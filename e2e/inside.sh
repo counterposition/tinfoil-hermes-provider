@@ -12,20 +12,30 @@ skip() { echo "SKIP  $*"; }
 obs()  { echo "OBSERVED  $*"; }
 section() { echo; echo "=== $* ==="; }
 
-# Private-repo clone auth: git reads these instead of a credential helper.
+# Private-repo clone auth. The installer isolates git from global config and
+# GIT_CONFIG_* overrides (hermes_cli/_subprocess_compat.py) but honors
+# GIT_ASKPASS, so that is the only way a token can reach a non-interactive clone.
 if [ -n "${GH_TOKEN:-}" ]; then
-  export GIT_CONFIG_COUNT=1
-  export GIT_CONFIG_KEY_0="url.https://x-access-token:${GH_TOKEN}@github.com/.insteadOf"
-  export GIT_CONFIG_VALUE_0="https://github.com/"
+  cat > /e2e/askpass.sh <<'ASK'
+#!/bin/sh
+case "$1" in Username*) echo x-access-token ;; *) echo "$GH_TOKEN" ;; esac
+ASK
+  chmod +x /e2e/askpass.sh
+  export GIT_ASKPASS=/e2e/askpass.sh
 fi
 
 # Make the host's proxy reachable at the plugin's default 127.0.0.1:3301.
 # The proxy rejects any other Host header (DNS-rebinding guard), so a plain
 # host alias would not do.
 proxy_live=0
-if [ -n "${PROXY_HOST:-}" ]; then
-  socat TCP-LISTEN:3301,bind=127.0.0.1,fork,reuseaddr "TCP:${PROXY_HOST}:3301" &
+fwd_pid=""
+start_forwarder() {
+  python /plugin/e2e/forward.py 3301 "$PROXY_HOST" 3301 &
+  fwd_pid=$!
   sleep 0.5
+}
+if [ -n "${PROXY_HOST:-}" ]; then
+  start_forwarder
   if curl -sf -m 5 http://127.0.0.1:3301/v1/models >/dev/null; then
     proxy_live=1; obs "tinfoil-proxy reachable via ${PROXY_HOST}"
   else
@@ -79,32 +89,15 @@ if [ $proxy_live -eq 1 ]; then
   grep -iE "tinfoil.*(ok|✓|reachable|healthy|[0-9]+ models)|✓.*tinfoil" <<<"$doc_out" >/dev/null \
     && pass "doctor probe passes with the proxy running" \
     || obs "doctor did not report a passing Tinfoil probe with the proxy running"
-  kill %1 2>/dev/null; wait %1 2>/dev/null; sleep 0.3
+  kill "$fwd_pid" 2>/dev/null; wait "$fwd_pid" 2>/dev/null; sleep 0.3
   doc_down="$(hermes doctor 2>&1)"; rc2=$?
   grep -i "tinfoil" <<<"$doc_down" || true
   grep -iE "tinfoil.*(fail|✗|❌|unreachable|refused|error|could not|not running)|(✗|❌|fail).*tinfoil" <<<"$doc_down" >/dev/null \
     && pass "doctor reports Tinfoil unreachable when the proxy is down" \
     || obs "doctor did not flag Tinfoil with the proxy down (exit $rc2)"
-  socat TCP-LISTEN:3301,bind=127.0.0.1,fork,reuseaddr "TCP:${PROXY_HOST}:3301" &
-  sleep 0.5
+  start_forwarder
 else
   skip "doctor probe (no proxy)"
-fi
-
-section "6. precedence: installed plugin beats a bundled copy"
-if [ -d /bundled-tinfoil ]; then
-  mkdir -p /opt/hermes-agent/plugins/model-providers/tinfoil
-  cp /bundled-tinfoil/__init__.py /bundled-tinfoil/plugin.yaml /opt/hermes-agent/plugins/model-providers/tinfoil/
-  sed -i 's/description="Tinfoil — confidential inference in verified enclaves (local proxy)"/description="Tinfoil (E2E-EDITED installed copy)"/' \
-    "$HERMES_HOME/plugins/tinfoil-provider/__init__.py"
-  python "$CHECKS" description "Tinfoil (E2E-EDITED installed copy)" \
-    && pass "installed copy's description wins over the bundled copy" \
-    || fail "bundled copy won (or edit not visible)"
-  rm -rf /opt/hermes-agent/plugins/model-providers/tinfoil
-  sed -i 's/description="Tinfoil (E2E-EDITED installed copy)"/description="Tinfoil — confidential inference in verified enclaves (local proxy)"/' \
-    "$HERMES_HOME/plugins/tinfoil-provider/__init__.py"
-else
-  skip "precedence (set FORK_TINFOIL_DIR to a bundled tinfoil/ directory)"
 fi
 
 section "7. live conversation checks"
@@ -124,6 +117,21 @@ rm_out="$(hermes plugins remove tinfoil-provider 2>&1 </dev/null)"; rc=$?; echo 
 [ $rc -eq 0 ] && pass "remove exit code 0" || fail "remove exit code $rc"
 [ ! -e "$HERMES_HOME/plugins/tinfoil-provider" ] && pass "plugin directory gone" || fail "plugin directory still present"
 python "$CHECKS" absent && pass "Tinfoil gone from registry and picker in a fresh process" || fail "Tinfoil still discoverable after remove"
+
+section "6. precedence: installed plugin beats a bundled copy"
+if [ -d /bundled-tinfoil ]; then
+  hermes plugins install "$PLUGIN_ID" >/dev/null 2>&1 </dev/null || fail "reinstall for the precedence check"
+  mkdir -p /opt/hermes-agent/plugins/model-providers/tinfoil
+  cp /bundled-tinfoil/__init__.py /bundled-tinfoil/plugin.yaml /opt/hermes-agent/plugins/model-providers/tinfoil/
+  sed -i 's/description="Tinfoil — confidential inference in verified enclaves (local proxy)"/description="Tinfoil (E2E-EDITED installed copy)"/' \
+    "$HERMES_HOME/plugins/tinfoil-provider/__init__.py"
+  python "$CHECKS" description "Tinfoil (E2E-EDITED installed copy)" \
+    && pass "installed copy's description wins over the bundled copy" \
+    || fail "bundled copy won (or edit not visible)"
+else
+  skip "precedence (set FORK_TINFOIL_DIR to a bundled tinfoil/ directory)"
+fi
+
 
 echo
 [ $fails -eq 0 ] && echo "E2E: all checks passed" || echo "E2E: $fails check(s) failed"

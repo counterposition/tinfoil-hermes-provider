@@ -192,3 +192,15 @@ class TestTinfoilReasoningRequestShape:
         kwargs = _build_request(profile, model, reasoning_config)
         assert "reasoning_effort" not in kwargs
         assert "reasoning_effort" not in kwargs.get("extra_body", {})
+
+
+def test_repository_passes_the_installer_security_scan():
+    """`hermes plugins install` refuses a 'dangerous' verdict and asks for
+    confirmation on 'caution'; the published tree must stay 'safe'."""
+    from tools.plugin_guard import scan_plugin
+
+    from conftest import REPO_ROOT
+
+    result = scan_plugin(REPO_ROOT, source="tinfoil-hermes-provider")
+    blocking = [f for f in result.findings if f.severity in ("critical", "high")]
+    assert result.verdict == "safe", blocking
