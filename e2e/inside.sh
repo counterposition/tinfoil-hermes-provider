@@ -53,7 +53,7 @@ echo "$install_out"
 [ -f "$HERMES_HOME/plugins/tinfoil-provider/plugin.yaml" ] \
   && pass "clone landed at \$HERMES_HOME/plugins/tinfoil-provider/plugin.yaml" \
   || fail "no plugin.yaml at \$HERMES_HOME/plugins/tinfoil-provider/"
-grep -q "No .hermes plugins enable. step" <<<"$install_out" \
+grep -q "Tinfoil provider installed" <<<"$install_out" \
   && pass "after-install.md was printed" || fail "after-install.md not printed"
 grep -q "plugins enable tinfoil-provider" <<<"$install_out" \
   && obs "installer still prints the generic 'hermes plugins enable' hint" \
@@ -63,8 +63,9 @@ grep -q "TINFOIL_API_KEY" <<<"$install_out" && obs "installer mentioned TINFOIL_
 section "2. hermes plugins list"
 list_out="$(hermes plugins list 2>&1)"; echo "$list_out"
 grep -q "tinfoil-provider" <<<"$list_out" && pass "plugin listed" || fail "plugin not listed"
-grep -qi "model-provider\|provider" <<<"$list_out" && obs "list output mentions provider kind" \
-  || obs "list output does not show a kind column (record for the spec)"
+row="$(grep -A1 "tinfoil-provider" <<<"$list_out" | tr -s ' ')"
+grep -q "not enabled" <<<"$row" && obs "list shows the plugin as 'not enabled' (plugin-manager status; no kind column)" \
+  || obs "list row: $row"
 
 section "3. hermes model: picker contents"
 python "$CHECKS" canonical && pass "CANONICAL_PROVIDERS contains slug 'tinfoil'" || fail "slug 'tinfoil' missing from picker list"

@@ -7,6 +7,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends git curl ca-cer
 COPY --from=hermes / /opt/hermes-agent
 WORKDIR /opt/hermes-agent
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev \
-    && uv pip install --python /opt/venv/bin/python pexpect
+    && uv pip install --python /opt/venv/bin/python pexpect pyte
 ENV PATH=/opt/venv/bin:$PATH HERMES_AGENT_SRC=/opt/hermes-agent HERMES_HOME=/e2e/hermes-home
 RUN mkdir -p /e2e/hermes-home && hermes --version

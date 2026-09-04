@@ -83,8 +83,10 @@ curl -s http://127.0.0.1:3301/v1/models | jq -r '.data[].id'
 ```
 
 It also lists non-chat entries (embeddings, speech, web search, document
-upload); the curated list keeps chat models at the top of the picker. The
-auxiliary model for summaries and tool helpers defaults to `gpt-oss-120b`.
+upload). The in-chat `/model` picker puts the curated chat models at the top;
+the `hermes model` setup flow currently shows the catalog in the proxy's own
+order, so scroll past the non-chat entries there. The auxiliary model for
+summaries and tool helpers defaults to `gpt-oss-120b`.
 
 ## Reasoning effort
 
@@ -122,9 +124,14 @@ hermes -p <profile> plugins install counterposition/tinfoil-hermes-provider
 Upstream issue [#88143](https://github.com/NousResearch/hermes-agent/issues/88143)
 tracks profile creation not seeding `plugins/`.
 
-**Verify.** `hermes doctor` probes the proxy's `/v1/models`; a failed probe
-means the proxy is not running (or `TINFOIL_BASE_URL` points somewhere
-else). See [Development](#development) for what doctor prints today.
+`hermes plugins list` shows the plugin with status "not enabled" and source
+"git". That status is the plugin manager's view and does not affect the
+provider; Tinfoil is selectable regardless.
+
+**Verify.** `hermes doctor` probes the proxy's `/v1/models` once
+`TINFOIL_API_KEY` is set. With the proxy running it prints `✓ Tinfoil`; with
+the proxy down it prints `⚠ Tinfoil ([Errno 111] Connection refused)`, which
+is the "proxy is not running" signal.
 
 ## Removing
 

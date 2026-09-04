@@ -1,77 +1,135 @@
 """Drive the interactive ``hermes model`` picker through a pty.
 
-Selects Tinfoil in the curses provider list, answers the API-key and Base URL
-prompts, confirms the live model list is shown, and picks the first model.
-Prints the transcript so a failure is diagnosable from the log.
+Walks the curses provider list until Tinfoil is highlighted, selects it,
+answers the API-key and Base URL prompts, confirms the live model list is
+shown, and picks the first model. Uses a terminal emulator (pyte) so the
+curses screen can be read as text; the final screen is printed on failure.
 """
 
 from __future__ import annotations
 
 import os
-import re
 import sys
+import time
 
 import pexpect
+import pyte
 
+ROWS, COLS = 50, 160
 KEY = "e2e-placeholder-key"
+DOWN = "\x1b[B"
 
 
-def screen_text(child: pexpect.spawn) -> str:
-    """Strip terminal escape sequences from what the child printed so far."""
-    raw = child.before or ""
-    if isinstance(raw, bytes):
-        raw = raw.decode("utf-8", "replace")
-    return re.sub(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b[()][A-Z0-9]|\x1b[=>]", "", raw)
+class Terminal:
+    def __init__(self, child: pexpect.spawn):
+        self.child = child
+        self.screen = pyte.Screen(COLS, ROWS)
+        self.stream = pyte.Stream(self.screen)
+
+    def pump(self, quiet: float = 0.4, limit: float = 30.0) -> None:
+        """Feed output until the child has been quiet for ``quiet`` seconds."""
+        deadline = time.time() + limit
+        last = time.time()
+        while time.time() < deadline:
+            try:
+                data = self.child.read_nonblocking(65536, timeout=0.1)
+                self.stream.feed(data)
+                last = time.time()
+            except pexpect.TIMEOUT:
+                if time.time() - last >= quiet:
+                    return
+            except pexpect.EOF:
+                return
+
+    def lines(self) -> list[str]:
+        return [line.rstrip() for line in self.screen.display]
+
+    def text(self) -> str:
+        return "\n".join(self.lines())
+
+    def wait_for(self, needle: str, limit: float = 45.0) -> bool:
+        deadline = time.time() + limit
+        while time.time() < deadline:
+            self.pump(quiet=0.3, limit=2.0)
+            if needle in self.text():
+                return True
+        return False
+
+    def dump(self, tag: str) -> None:
+        print(f"--- screen: {tag} ---")
+        for line in self.lines():
+            if line:
+                print("  | " + line)
+        print("--- end ---")
+
+
+def cursor_line(term: Terminal) -> str:
+    """The row the curses cursor (→) is on; (●) is the radio state, not the cursor."""
+    return next((line for line in term.lines() if line.lstrip().startswith("→")), "")
 
 
 def main() -> int:
-    from hermes_cli.models import list_available_providers
-
-    order = [p["id"] for p in list_available_providers()]
-    idx = order.index("tinfoil")
-    print(f"provider picker order: {order}\nTinfoil is entry #{idx}")
-
-    env = dict(os.environ, TERM="xterm-256color", LINES="60", COLUMNS="120")
+    env = dict(os.environ, TERM="xterm-256color", LINES=str(ROWS), COLUMNS=str(COLS))
     child = pexpect.spawn("hermes", ["model"], env=env, encoding="utf-8", timeout=60,
-                          dimensions=(60, 120))
-    transcript: list[str] = []
+                          dimensions=(ROWS, COLS))
+    term = Terminal(child)
     try:
-        child.expect(["Tinfoil", pexpect.TIMEOUT], timeout=30)
-        transcript.append(screen_text(child))
-        if "Tinfoil" not in transcript[-1] + (child.after if isinstance(child.after, str) else ""):
-            print("provider list never showed 'Tinfoil'")
+        if not term.wait_for("Select provider"):
+            term.dump("no provider picker")
+            return 1
+        if "Tinfoil" not in term.text():
+            term.dump("provider list without Tinfoil")
             return 1
         print("provider list shows Tinfoil")
-        for _ in range(idx):
-            child.send("\x1b[B")  # Down arrow
+
+        for _ in range(200):
+            selected = cursor_line(term)
+            if "Tinfoil" in selected:
+                break
+            child.send(DOWN)
+            term.pump(quiet=0.15, limit=3.0)
+        else:
+            term.dump("could not highlight Tinfoil")
+            return 1
+        print("highlighted:", selected.strip())
         child.send("\r")
-        child.expect("TINFOIL_API_KEY")
-        transcript.append(screen_text(child))
+
+        if not term.wait_for("TINFOIL_API_KEY"):
+            term.dump("no API key prompt")
+            return 1
         print("prompted for TINFOIL_API_KEY")
         child.sendline(KEY)
-        child.expect(r"Base URL \[(.*?)\]:")
-        default_base = child.match.group(1)
+
+        if not term.wait_for("Base URL ["):
+            term.dump("no Base URL prompt")
+            return 1
+        prompt_line = next(line for line in term.lines() if "Base URL [" in line)
+        default_base = prompt_line.split("Base URL [", 1)[1].split("]", 1)[0]
         print(f"prompted for Base URL, default {default_base!r}")
         if not default_base.startswith("http://127.0.0.1:3301"):
-            print("Base URL default is not the local proxy")
             return 1
         child.sendline("")
-        child.expect(["kimi-k3", pexpect.TIMEOUT], timeout=45)
-        text = screen_text(child) + (child.after if isinstance(child.after, str) else "")
-        transcript.append(text)
-        live_seen = [m for m in ("kimi-k3", "glm-5-3", "deepseek-v4-flash", "gpt-oss-120b", "whisper-large-v3-turbo") if m in text]
-        print("model picker showed:", live_seen)
-        if "kimi-k3" not in live_seen:
-            print("model picker did not show the curated first model")
+
+        if not term.wait_for("kimi-k3", limit=60):
+            term.dump("model picker without kimi-k3")
             return 1
-        child.send("\r")  # pick the highlighted (first) model
-        child.expect(pexpect.EOF, timeout=60)
-        transcript.append(screen_text(child))
-    except pexpect.ExceptionPexpect as exc:
-        print("pexpect failure:", type(exc).__name__)
-        transcript.append(screen_text(child))
-        print("\n--- transcript ---\n" + "\n".join(transcript) + "\n--- end ---")
-        return 1
+        text = term.text()
+        seen = [m for m in ("kimi-k3", "glm-5-3", "deepseek-v4-flash", "gpt-oss-120b", "whisper-large-v3-turbo") if m in text]
+        print("model picker shows:", seen)
+        rows = [line.split(")", 1)[1].strip() for line in term.lines() if "(○)" in line or "(●)" in line]
+        from providers import get_provider_profile
+
+        curated_first = get_provider_profile("tinfoil").fallback_models[0]
+        if rows and rows[0] == curated_first:
+            print("OBSERVED  hermes model lists curated fallbacks first")
+        else:
+            print(f"OBSERVED  hermes model lists the live catalog in the proxy's order (first row {rows[0] if rows else None!r}); "
+                  "the setup flow's generic branch uses fetch_api_models and ignores fallback_models (upstream behavior)")
+        selected = cursor_line(term)
+        print("highlighted:", selected.strip())
+        child.send("\r")
+        term.pump(quiet=1.0, limit=60.0)
+        term.dump("after selection")
     finally:
         if child.isalive():
             child.terminate(force=True)
@@ -81,8 +139,6 @@ def main() -> int:
     cfg = yaml.safe_load(open(os.path.join(os.environ["HERMES_HOME"], "config.yaml")))
     model = cfg.get("model")
     print("config.yaml model section:", model)
-    tail = transcript[-1].strip().splitlines()[-6:]
-    print("\n".join("  | " + line for line in tail))
     if isinstance(model, dict) and model.get("provider") == "tinfoil" and model.get("default"):
         return 0
     print("config.yaml does not record provider tinfoil with a default model")
