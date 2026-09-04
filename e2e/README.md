@@ -1,0 +1,25 @@
+# Install E2E
+
+`run.sh` builds a throwaway container from a hermes-agent checkout (tracked
+files only) and runs `inside.sh` in it: the real `hermes plugins install`,
+`hermes plugins list`, the `hermes model` picker (driven through a pty),
+`hermes doctor` with the proxy up and down, the installed-beats-bundled
+precedence check, optional live conversation checks, and
+`hermes plugins remove`. The container has its own `HERMES_HOME`; nothing on
+the host is touched.
+
+```bash
+HERMES_AGENT_SRC=~/c/vendor/hermes-agent \
+GH_TOKEN="$(gh auth token)" \
+FORK_TINFOIL_DIR=~/c/mine/hermes-agent/plugins/model-providers/tinfoil \
+e2e/run.sh
+```
+
+- `GH_TOKEN` is only needed while the repository is private.
+- The host's `tinfoil-proxy` is reached through `PROXY_HOST`
+  (default `host.docker.internal`) and forwarded to `127.0.0.1:3301` inside
+  the container, so the plugin's default `base_url` is exercised unchanged.
+- Set `TINFOIL_API_KEY` to run the live conversation checks
+  (`live_checks.py`); they are skipped otherwise.
+- `PLUGIN_ID` can point at a local clone (`file:///plugin`) to test
+  uncommitted changes; the installer warns about the `file://` scheme.

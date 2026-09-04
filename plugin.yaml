@@ -1,0 +1,14 @@
+name: tinfoil-provider
+kind: model-provider
+version: 1.0.0
+description: Tinfoil confidential inference via the local tinfoil-proxy
+author: Harish Kukreja
+homepage: https://github.com/counterposition/tinfoil-hermes-provider
+requires_env:
+  - name: TINFOIL_API_KEY
+    description: Tinfoil API key (forwarded per-request to the enclave)
+    url: https://tinfoil.sh/
+    secret: true
+optional_env:
+  - name: TINFOIL_BASE_URL
+    description: Override the local tinfoil-proxy URL (default http://127.0.0.1:3301/v1)

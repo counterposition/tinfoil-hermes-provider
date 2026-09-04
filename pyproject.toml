@@ -1,0 +1,5 @@
+# Not a Python distribution: this file only carries the pytest configuration.
+# The plugin is installed with `hermes plugins install`, never pip.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"

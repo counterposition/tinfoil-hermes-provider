@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent that keeps tinfoil-proxy running on 127.0.0.1:3301.
+
+  Install:   cp sh.tinfoil.proxy.plist ~/Library/LaunchAgents/
+             launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/sh.tinfoil.proxy.plist
+  Verify:    launchctl print gui/$(id -u)/sh.tinfoil.proxy | head -20
+             curl -s http://127.0.0.1:3301/verification-document | head -c 300
+  Restart:   launchctl kickstart -k gui/$(id -u)/sh.tinfoil.proxy   (after a binary update)
+  Remove:    launchctl bootout gui/$(id -u)/sh.tinfoil.proxy
+
+  The proxy binds its port first and then attests against the public
+  transparency log, so startup needs network. At login it can come up before
+  DHCP or the VPN settles and exit; KeepAlive relaunches it and the 15 s
+  ThrottleInterval keeps that retry loop polite. A bound port is not proof of
+  attestation; GET /verification-document is.
+
+  The binary is expected at $HOME/go/bin/tinfoil-proxy (the `go install`
+  location). Edit the exec line below if yours lives elsewhere. Stop any
+  manually started proxy before bootstrapping, or launchd will crash-loop
+  on the port conflict.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>sh.tinfoil.proxy</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>exec "$HOME/go/bin/tinfoil-proxy" --log-format text >> "$HOME/Library/Logs/tinfoil-proxy.log" 2>&amp;1</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>15</integer>
+</dict>
+</plist>
