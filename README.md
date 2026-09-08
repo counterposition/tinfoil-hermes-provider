@@ -16,10 +16,6 @@ After that, **Tinfoil** appears in `hermes model`, `/model`, `hermes setup`,
 and `hermes doctor`. No file placement, no core patch, and no
 `hermes plugins enable` step (see [Installing](#installing)).
 
-Requires a hermes-agent that discovers provider plugins from the flat install
-directory (upstream commit `0cbc6e37ac`, merged 2026-09-02; v0.21.0 and
-later).
-
 ## Prerequisite: the local proxy is the provider
 
 Install and run `tinfoil-proxy` on every machine that runs Hermes. The proxy
@@ -163,7 +159,3 @@ is only needed when the checkout is not already importable.
 plugin into an upstream checkout with the real `hermes plugins install` and
 walks the install, list, picker, doctor, precedence, and remove steps. See
 `e2e/README.md`.
-
-## License
-
-MIT, matching hermes-agent.
