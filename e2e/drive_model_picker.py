@@ -94,11 +94,21 @@ def main() -> int:
         print("highlighted:", selected.strip())
         child.send("\r")
 
-        if not term.wait_for("TINFOIL_API_KEY"):
+        deadline = time.time() + 45
+        while time.time() < deadline:
+            term.pump(quiet=0.3, limit=2.0)
+            text = term.text()
+            if "[K]eep / [R]eplace / [C]lear" in text:
+                print("a TINFOIL_API_KEY is already configured; keeping it")
+                child.sendline("")
+                break
+            if "TINFOIL_API_KEY" in text:
+                print("prompted for TINFOIL_API_KEY")
+                child.sendline(KEY)
+                break
+        else:
             term.dump("no API key prompt")
             return 1
-        print("prompted for TINFOIL_API_KEY")
-        child.sendline(KEY)
 
         if not term.wait_for("Base URL ["):
             term.dump("no Base URL prompt")

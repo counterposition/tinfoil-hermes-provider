@@ -4,6 +4,10 @@ set -uo pipefail
 PLUGIN_ID="${PLUGIN_ID:-counterposition/tinfoil-hermes-provider}"
 export HERMES_HOME="${HERMES_HOME:-/e2e/hermes-home}"
 mkdir -p "$HERMES_HOME"
+# A real key is only for the live step; steps 1-4 must see a fresh install
+# with no key, so the installer's prompt and the picker's key prompt are exercised.
+LIVE_KEY="${TINFOIL_API_KEY:-}"
+unset TINFOIL_API_KEY
 CHECKS=/plugin/e2e/checks.py
 fails=0
 pass() { echo "PASS  $*"; }
@@ -44,7 +48,7 @@ if [ -n "${PROXY_HOST:-}" ]; then
 fi
 
 section "hermes version"
-hermes --version | head -2; echo "upstream rev: $(cat /opt/hermes-agent/.upstream-rev)"
+ver="$(hermes --version 2>&1)"; printf "%s\n" "$ver" | sed -n 1,2p; echo "upstream rev: $(cat /opt/hermes-agent/.upstream-rev)"
 
 section "1. hermes plugins install ${PLUGIN_ID}"
 install_out="$(hermes plugins install "$PLUGIN_ID" 2>&1 </dev/null)"; rc=$?
@@ -102,11 +106,11 @@ else
 fi
 
 section "7. live conversation checks"
-if [ -n "${TINFOIL_API_KEY:-}" ] && [ $proxy_live -eq 1 ]; then
-  python - <<'PY'
+if [ -n "$LIVE_KEY" ] && [ $proxy_live -eq 1 ]; then
+  LIVE_KEY="$LIVE_KEY" python - <<'PY'
 import os
 from hermes_cli.config import save_env_value
-save_env_value("TINFOIL_API_KEY", os.environ["TINFOIL_API_KEY"])
+save_env_value("TINFOIL_API_KEY", os.environ["LIVE_KEY"])
 PY
   python /plugin/e2e/live_checks.py && pass "live checks" || fail "live checks (see above)"
 else
