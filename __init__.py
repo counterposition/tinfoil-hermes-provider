@@ -15,14 +15,30 @@ at Tinfoil's unverified direct endpoint by default.
 
 from typing import Any
 
+from agent.reasoning_effort import (
+    EFFORT_LADDER,
+    OPENAI_COMPAT_WIRE_EFFORTS,
+    clamp_effort,
+    requested_effort,
+)
 from providers import register_provider
 from providers.base import ProviderProfile
 
 
-# Hermes effort vocabulary -> values accepted by Tinfoil's full-range models.
-# Unsupported per-model values return HTTP 400, so every narrower family is
-# translated explicitly below.
-_FULL_RANGE = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+# Tinfoil's wire contracts differ from the models' native providers. Match
+# known model IDs, not whole families: new releases can change their vocabulary.
+# https://docs.tinfoil.sh/guides/reasoning (verified 2026-09-13)
+_THREE_LEVEL_EFFORTS = ("low", "high", "max")
+_REASONING_EFFORTS = {
+    "kimi-k3": _THREE_LEVEL_EFFORTS,
+    "glm-5-3": _THREE_LEVEL_EFFORTS,
+    "glm-5-3-flash": _THREE_LEVEL_EFFORTS,
+    "gpt-oss-120b": ("low", "medium", "high"),
+    "gpt-oss-safeguard-120b": ("low", "medium", "high"),
+    "deepseek-v4-flash": OPENAI_COMPAT_WIRE_EFFORTS,
+    "gemma4-31b": OPENAI_COMPAT_WIRE_EFFORTS,
+    "llama3-3-70b": (),
+}
 
 
 class TinfoilProfile(ProviderProfile):
@@ -34,6 +50,15 @@ class TinfoilProfile(ProviderProfile):
         # (Ollama, LM Studio, vLLM) to Tinfoil. Selection is explicit instead.
         return ""
 
+    def default_vision_model(self) -> str:
+        # Keep automatic image analysis on the verified proxy even when the
+        # main/auxiliary chat model is text-only. Explicit Hermes routes win.
+        return "gemma4-31b"
+
+    def supported_reasoning_efforts(self, model: str | None) -> tuple[str, ...] | None:
+        bare_model = (model or "").strip().lower().rsplit("/", 1)[-1]
+        return _REASONING_EFFORTS.get(bare_model)
+
     def build_api_kwargs_extras(
         self,
         *,
@@ -42,43 +67,19 @@ class TinfoilProfile(ProviderProfile):
         **context: Any,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Translate Hermes reasoning settings to Tinfoil's wire contract."""
-        if not isinstance(reasoning_config, dict):
+        supported = self.supported_reasoning_efforts(model)
+        if not supported or not isinstance(reasoning_config, dict):
             return {}, {}
 
-        model_lower = (model or "").lower()
-        effort = str(reasoning_config.get("effort") or "medium").strip().lower()
-        disabled = reasoning_config.get("enabled") is False
-
-        if "kimi" in model_lower:
-            # Tinfoil's Kimi reasoning models accept a narrower effort range
-            # and do not expose a disable value.
-            if disabled:
-                return {}, {}
-            mapped = {"low": "low", "medium": "high", "high": "high"}.get(effort, "max")
-            return {}, {"reasoning_effort": mapped}
-
-        if "gpt-oss" in model_lower:
-            # gpt-oss accepts only low/medium/high and has no disable value.
-            if disabled:
-                return {}, {}
-            if effort in ("xhigh", "max", "ultra"):
-                effort = "high"
-            if effort not in ("low", "medium", "high"):
-                effort = "medium"
-            return {}, {"reasoning_effort": effort}
-
-        if any(family in model_lower for family in ("deepseek", "glm", "gemma")):
-            if disabled:
-                return {}, {"reasoning_effort": "none"}
-            if effort == "ultra":
-                effort = "max"
-            if effort not in _FULL_RANGE:
-                effort = "medium"
-            return {}, {"reasoning_effort": effort}
-
-        # Unknown/new models are safer with the server default than a field
-        # whose accepted values Hermes cannot yet know.
-        return {}, {}
+        # Always-on models have no disable value. Send their minimum rather
+        # than omit the field: Kimi/GLM default to max when it is absent.
+        effort = "none" if reasoning_config.get("enabled") is False else requested_effort(reasoning_config)
+        if effort not in EFFORT_LADDER:
+            return {}, {}
+        # Preserve the three-level low/middle/top mapping used by Hermes' Kimi
+        # integration. All other gaps use Hermes' nearest-weaker clamp.
+        overrides = {"medium": "high", "xhigh": "max"} if supported == _THREE_LEVEL_EFFORTS else None
+        return {}, {"reasoning_effort": clamp_effort(effort, supported, overrides)}
 
 
 tinfoil = TinfoilProfile(
@@ -90,13 +91,11 @@ tinfoil = TinfoilProfile(
     base_url="http://127.0.0.1:3301/v1",
     auth_type="api_key",
     default_aux_model="gpt-oss-120b",
-    # Snapshot of the proxy's chat-capable, tool-calling catalog
-    # (GET /v1/models, 2026-09-03), most-capable-first. Not a contract: the
-    # picker merges this list with the live catalog at selection time.
+    # Stable, non-deprecated chat models from GET /v1/models (2026-09-13).
+    # Experimental and retiring models remain available through live discovery.
     fallback_models=(
         "kimi-k3",
         "glm-5-3",
-        "deepseek-v4-flash",
         "gemma4-31b",
         "gpt-oss-120b",
         "llama3-3-70b",

@@ -16,17 +16,23 @@ After that, **Tinfoil** appears in `hermes model`, `/model`, `hermes setup`,
 and `hermes doctor`. No file placement, no core patch, and no
 `hermes plugins enable` step (see [Installing](#installing)).
 
+With the proxy running, run **`hermes model`**, choose **Tinfoil**, enter your
+API key when prompted, accept the local Base URL, and select a chat model.
+The picker saves your settings. `hermes config` displays configuration;
+it does not prompt for a key.
+
 ## Prerequisite: the local proxy is the provider
 
 Install and run `tinfoil-proxy` on every machine that runs Hermes. The proxy
 binds loopback only (`127.0.0.1:3301`), so a proxy on one machine does not
 serve another.
 
-- **CLI proxy:** follow [Tinfoil's docs](https://docs.tinfoil.sh/). On macOS,
+- **CLI proxy:** follow [Tinfoil's installation guide](https://docs.tinfoil.sh/local-proxy/cli). On macOS,
   `scripts/sh.tinfoil.proxy.plist` is a LaunchAgent that keeps it running:
 
   ```bash
-  cp "$HERMES_HOME"/plugins/tinfoil-provider/scripts/sh.tinfoil.proxy.plist ~/Library/LaunchAgents/
+  mkdir -p ~/Library/LaunchAgents
+  cp "${HERMES_HOME:-$HOME/.hermes}"/plugins/tinfoil-provider/scripts/sh.tinfoil.proxy.plist ~/Library/LaunchAgents/
   # edit the exec line if the binary is not at ~/go/bin/tinfoil-proxy
   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/sh.tinfoil.proxy.plist
   ```
@@ -41,7 +47,7 @@ serve another.
 A bound port is not proof of attestation. This is:
 
 ```bash
-curl -s http://127.0.0.1:3301/verification-document | head -c 300
+curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3301/verification-document
 ```
 
 ### The direct endpoint, and why this plugin does not use it
@@ -61,44 +67,57 @@ it.
 | `TINFOIL_API_KEY` | yes | Your Tinfoil API key. The proxy forwards it per request as Bearer auth; the proxy itself takes no key. |
 | `TINFOIL_BASE_URL` | no | Override the proxy URL. Default `http://127.0.0.1:3301/v1`. Legitimate uses: a non-default proxy port, or a proxy on another host on a private network (the hop from Hermes to that proxy is then outside the attested path). |
 
-Set them with `hermes config` or `hermes setup`; the installer also prompts
-for `TINFOIL_API_KEY` when run interactively. Then run `hermes model`, pick
-**Tinfoil**, and pick a model. Prefer the picker over hand-editing
-`model.provider`: upstream Hermes does not yet supply a silent default model
-for plugin providers, so a config with `provider: tinfoil` and no `model`
-resolves to an empty model.
+`hermes model` prompts for the key and optional Base URL; the installer also
+prompts for `TINFOIL_API_KEY` when run interactively. Use the picker to choose
+both the provider and model. Setting only `model.provider: tinfoil` by hand
+is not enough: Hermes does not yet choose a model automatically for plugins.
 
 ## Models
 
-The picker fetches the live catalog from the proxy and merges it with a short
-curated list (chat-capable, tool-calling models, most capable first). The
-live catalog is the truth:
+The in-chat `/model` picker combines the current model list with a short
+backup list of stable chat models that support tools. To list current chat choices:
 
 ```bash
-curl -s http://127.0.0.1:3301/v1/models | jq -r '.data[].id'
+curl -fsS --max-time 10 http://127.0.0.1:3301/v1/models \
+  | jq -r '.data[] | select(.type == "chat" and .tool_calling == true and .deprecated != true) | .id'
 ```
 
-It also lists non-chat entries (embeddings, speech, web search, document
-upload). The in-chat `/model` picker puts the curated chat models at the top;
-the `hermes model` setup flow currently shows the catalog in the proxy's own
-order, so scroll past the non-chat entries there. The auxiliary model for
-summaries and tool helpers defaults to `gpt-oss-120b`.
+The unfiltered catalog includes embeddings, speech, and other non-chat
+entries. The `hermes model` setup screen gets its list from Hermes' model
+database or the proxy. This screen does not use the plugin's backup list.
+Choose a chat model; if the proxy is offline, enter its ID manually.
+The in-chat picker can still show the backup list offline.
+
+Summaries and tool helpers default to `gpt-oss-120b`. Automatic image analysis
+uses `gemma4-31b` through the same proxy, including when the main model is
+text-only. If you set your own provider or model under `auxiliary`, Hermes
+uses your choice instead.
+
+The September 13 catalog marks `deepseek-v4-flash` deprecated with a September
+15 retirement date. It is no longer in the backup list. Its replacement
+`deepseek-v4-1-flash` and `glm-5-3-flash` are currently experimental; live
+model lists from the proxy still show them, but the backup list does not.
 
 ## Reasoning effort
 
 Tinfoil takes `reasoning_effort` as a top-level request field, and the
-accepted values differ per model family. Unsupported values are HTTP 400, so
-the plugin translates Hermes' effort setting per family:
+accepted values differ per model. The plugin uses Hermes' shared helpers to
+map your setting to a value that [Tinfoil accepts](https://docs.tinfoil.sh/guides/reasoning):
 
-| Family | Accepted by Tinfoil | Hermes `reasoning.effort` sent as |
+| Model | Accepted by Tinfoil | Hermes `reasoning.effort` sent as |
 | --- | --- | --- |
-| `kimi-*` | `low`, `high`, `max` | `low` → `low`; `medium`, `high` → `high`; `xhigh`, `max`, `ultra` → `max`. Disabling reasoning omits the field (always reasons). |
-| `gpt-oss-*` | `low`, `medium`, `high` | `xhigh`, `max`, `ultra` → `high`; anything else outside the range → `medium`. Disabling omits the field. |
-| `deepseek-*`, `glm-*`, `gemma*` | `none` … `max` (full range) | Passed through; `ultra` → `max`. Disabling sends `none`. |
-| `llama*` and unknown models | varies | Field omitted; the server default applies. |
+| `kimi-k3`, `glm-5-3`, `glm-5-3-flash` | `low`, `high`, `max` | `none`, `minimal`, `low` → `low`; `medium`, `high` → `high`; `xhigh`, `max`, `ultra` → `max`. |
+| `gpt-oss-120b`, `gpt-oss-safeguard-120b` | `low`, `medium`, `high` | `none`, `minimal` → `low`; `xhigh`, `max`, `ultra` → `high`. |
+| `deepseek-v4-flash`, `gemma4-31b` | `none` … `max` | Passed through; `ultra` → `max`. |
+| `llama3-3-70b` and unknown/new models | not specified here | No effort setting is sent; the server chooses its default. |
 
-Thinking comes back in a separate `reasoning` response field. DeepSeek only
-reasons when the field is sent, so leave Hermes' reasoning enabled for it.
+Disabling reasoning sends `none` where supported, otherwise `low`: always-on
+models cannot stop thinking, and omitting the field can select their most
+expensive default. Unset or invalid effort settings omit the field. Unknown
+model IDs do not inherit assumptions from similarly named models.
+
+Thinking comes back in a separate `reasoning` response field, which Hermes
+already handles. DeepSeek V4 Flash reasons only when effort is set.
 
 ## Installing
 
@@ -127,7 +146,10 @@ provider; Tinfoil is selectable regardless.
 **Verify.** `hermes doctor` probes the proxy's `/v1/models` once
 `TINFOIL_API_KEY` is set. With the proxy running it prints `✓ Tinfoil`; with
 the proxy down it prints `⚠ Tinfoil ([Errno 111] Connection refused)`, which
-is the "proxy is not running" signal.
+indicates a connection failure. A passing catalog probe establishes
+reachability, not API-key validity or successful inference: the proxy's
+catalog is public. Check `/verification-document` to see whether the proxy
+has finished checking the enclave.
 
 ## Removing
 
@@ -135,25 +157,30 @@ is the "proxy is not running" signal.
 hermes plugins remove tinfoil-provider
 ```
 
-Tinfoil disappears from the picker on the next session. Your
-`TINFOIL_API_KEY` stays in `$HERMES_HOME/.env` until you remove it with
-`hermes config`.
+Tinfoil disappears from the picker on the next invocation. If it was selected,
+run `hermes model` to choose another provider. Remove its saved key with
+`hermes config unset TINFOIL_API_KEY` if no longer needed.
 
 ## Development
 
+Validated against Hermes **0.21.2**, upstream commit
+[`205645ee4241`](https://github.com/NousResearch/hermes-agent/commit/205645ee424163c7b6cfc032c331c3557797497b)
+on September 13, 2026. Use a current Hermes checkout: this plugin relies on
+its provider hooks and `agent.reasoning_effort` helpers.
+
 The tests load the plugin through Hermes' real discovery path (a temporary
 `HERMES_HOME` with the repo copied to `plugins/tinfoil-provider/`), stub the
-proxy, and make no network calls. They need a hermes-agent checkout with its
-dependencies installed:
+proxy, and make no external network calls. They need a hermes-agent checkout
+with its dependencies installed:
 
 ```bash
-export HERMES_AGENT_SRC=~/c/vendor/hermes-agent   # a checkout containing 0cbc6e37ac
-uv run --project "$HERMES_AGENT_SRC" --frozen pytest -q tests
+HERMES_AGENT_SRC=~/c/vendor/hermes-agent
+"$HERMES_AGENT_SRC/scripts/run_tests.sh" "$PWD/tests" -q
 ```
 
-Any interpreter that has hermes-agent's dependencies works, for example
-`"$HERMES_AGENT_SRC"/.venv/bin/python -m pytest -q tests`. `HERMES_AGENT_SRC`
-is only needed when the checkout is not already importable.
+Hermes' runner runs each test file separately and removes real credentials
+from the test environment. The tests check plugin loading, request settings,
+user choices, model lists, connection checks, image analysis, and old Hermes imports.
 
 `e2e/` holds a container harness (Docker or OrbStack) that installs the
 plugin into an upstream checkout with the real `hermes plugins install` and

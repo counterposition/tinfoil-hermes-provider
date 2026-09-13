@@ -36,13 +36,11 @@ class _ModelsHandler(BaseHTTPRequestHandler):
 
 
 def _build_request(profile, model: str, reasoning_config: dict | None):
-    transport = object.__new__(ChatCompletionsTransport)
-    return transport._build_kwargs_from_profile(
-        profile,
+    return ChatCompletionsTransport().build_kwargs(
         model,
         [{"role": "user", "content": "hi"}],
-        None,
-        {"reasoning_config": reasoning_config},
+        provider_profile=profile,
+        reasoning_config=reasoning_config,
     )
 
 
@@ -144,12 +142,15 @@ class TestTinfoilConfigurationWiring:
 
 
 class TestTinfoilReasoningRequestShape:
+    @pytest.mark.parametrize("model", ["kimi-k3", "glm-5-3", "glm-5-3-flash"])
     @pytest.mark.parametrize(
         ("effort", "expected"),
-        [("medium", "high"), ("xhigh", "max"), ("max", "max"), ("ultra", "max")],
+        [("none", "low"), ("minimal", "low"), ("low", "low"),
+         ("medium", "high"), ("high", "high"), ("xhigh", "max"),
+         ("max", "max"), ("ultra", "max")],
     )
-    def test_kimi_efforts_are_clamped(self, profile, effort, expected):
-        kwargs = _build_request(profile, "kimi-k3", {"effort": effort})
+    def test_three_level_efforts_are_clamped(self, profile, model, effort, expected):
+        kwargs = _build_request(profile, model, {"effort": effort})
         assert kwargs["reasoning_effort"] == expected
         assert "reasoning_effort" not in kwargs.get("extra_body", {})
 
@@ -159,7 +160,7 @@ class TestTinfoilReasoningRequestShape:
         assert kwargs["reasoning_effort"] == "high"
         assert "reasoning_effort" not in kwargs.get("extra_body", {})
 
-    @pytest.mark.parametrize("model", ["deepseek-v4-flash", "glm-5-3", "gemma4-31b"])
+    @pytest.mark.parametrize("model", ["deepseek-v4-flash", "gemma4-31b"])
     def test_full_range_ultra_maps_to_max(self, profile, model):
         kwargs = _build_request(profile, model, {"effort": "ultra"})
         assert kwargs["reasoning_effort"] == "max"
@@ -171,20 +172,24 @@ class TestTinfoilReasoningRequestShape:
         kwargs = _build_request(profile, "deepseek-v4-flash", {"effort": effort})
         assert kwargs["reasoning_effort"] == effort
 
-    @pytest.mark.parametrize("model", ["deepseek-v4-flash", "glm-5-3", "gemma4-31b"])
+    @pytest.mark.parametrize("model", ["deepseek-v4-flash", "gemma4-31b"])
     def test_full_range_disable_is_explicit_none(self, profile, model):
         kwargs = _build_request(profile, model, {"enabled": False})
         assert kwargs["reasoning_effort"] == "none"
 
-    @pytest.mark.parametrize("model", ["kimi-k3", "gpt-oss-120b"])
-    def test_narrow_family_disable_omits_unsupported_value(self, profile, model):
+    @pytest.mark.parametrize("model", ["kimi-k3", "glm-5-3", "glm-5-3-flash", "gpt-oss-120b"])
+    def test_always_on_models_use_minimum_when_disabled(self, profile, model):
         kwargs = _build_request(profile, model, {"enabled": False})
-        assert "reasoning_effort" not in kwargs
+        assert kwargs["reasoning_effort"] == "low"
         assert "reasoning_effort" not in kwargs.get("extra_body", {})
 
     @pytest.mark.parametrize(
         ("model", "reasoning_config"),
-        [("deepseek-v4-flash", None), ("future-secure-model", {"effort": "high"})],
+        [("deepseek-v4-flash", None), ("deepseek-v4-flash", {}),
+         ("kimi-k3", {"effort": "invalid"}),
+         ("future-secure-model", {"effort": "high"}),
+         ("glm-future", {"effort": "high"}),
+         ("llama3-3-70b", {"effort": "high"})],
     )
     def test_unspecified_or_unknown_reasoning_omits_field(
         self, profile, model, reasoning_config
@@ -192,6 +197,35 @@ class TestTinfoilReasoningRequestShape:
         kwargs = _build_request(profile, model, reasoning_config)
         assert "reasoning_effort" not in kwargs
         assert "reasoning_effort" not in kwargs.get("extra_body", {})
+
+    def test_request_overrides_win_without_mutating_session_settings(self, profile):
+        from copy import deepcopy
+
+        reasoning = {"effort": "ultra"}
+        messages = [{"role": "user", "content": "hi"}]
+        original = deepcopy((reasoning, messages))
+        transport = ChatCompletionsTransport()
+        kwargs = transport.build_kwargs(
+            "glm-5-3", messages, provider_profile=profile,
+            reasoning_config=reasoning, session_id="test-session",
+            request_overrides={"reasoning_effort": "low", "max_tokens": 123},
+        )
+        assert kwargs["reasoning_effort"] == "low"
+        assert kwargs["max_tokens"] == 123
+        assert "prompt_cache_key" not in kwargs
+        assert (reasoning, messages) == original
+        # A later request through the same transport uses its own model's range.
+        assert transport.build_kwargs(
+            "openai/gpt-oss-120b", messages, provider_profile=profile,
+            reasoning_config=reasoning,
+        )["reasoning_effort"] == "high"
+
+
+def test_repository_uses_current_hermes_import_paths():
+    from hermes_cli.plugin_compat import scan_plugin
+    from conftest import REPO_ROOT
+
+    assert scan_plugin(REPO_ROOT) == []
 
 
 def test_repository_passes_the_installer_security_scan():

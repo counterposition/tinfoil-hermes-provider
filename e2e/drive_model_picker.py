@@ -2,7 +2,7 @@
 
 Walks the curses provider list until Tinfoil is highlighted, selects it,
 answers the API-key and Base URL prompts, confirms the live model list is
-shown, and picks the first model. Uses a terminal emulator (pyte) so the
+shown, and picks a curated chat model. Uses a terminal emulator (pyte) so the
 curses screen can be read as text; the final screen is printed on failure.
 """
 
@@ -69,6 +69,10 @@ def cursor_line(term: Terminal) -> str:
 
 
 def main() -> int:
+    from providers import get_provider_profile
+
+    curated = get_provider_profile("tinfoil").fallback_models
+    selected_model = curated[0]
     env = dict(os.environ, TERM="xterm-256color", LINES=str(ROWS), COLUMNS=str(COLS))
     child = pexpect.spawn("hermes", ["model"], env=env, encoding="utf-8", timeout=60,
                           dimensions=(ROWS, COLS))
@@ -77,11 +81,6 @@ def main() -> int:
         if not term.wait_for("Select provider"):
             term.dump("no provider picker")
             return 1
-        if "Tinfoil" not in term.text():
-            term.dump("provider list without Tinfoil")
-            return 1
-        print("provider list shows Tinfoil")
-
         for _ in range(200):
             selected = cursor_line(term)
             if "Tinfoil" in selected:
@@ -120,22 +119,29 @@ def main() -> int:
             return 1
         child.sendline("")
 
-        if not term.wait_for("kimi-k3", limit=60):
-            term.dump("model picker without kimi-k3")
+        if not term.wait_for(selected_model, limit=60):
+            term.dump(f"model picker without {selected_model}")
             return 1
         text = term.text()
-        seen = [m for m in ("kimi-k3", "glm-5-3", "deepseek-v4-flash", "gpt-oss-120b", "whisper-large-v3-turbo") if m in text]
+        seen = [m for m in curated if m in text]
         print("model picker shows:", seen)
         rows = [line.split(")", 1)[1].strip() for line in term.lines() if "(○)" in line or "(●)" in line]
-        from providers import get_provider_profile
-
-        curated_first = get_provider_profile("tinfoil").fallback_models[0]
-        if rows and rows[0] == curated_first:
+        if rows and rows[0] == selected_model:
             print("OBSERVED  hermes model lists curated fallbacks first")
         else:
             print(f"OBSERVED  hermes model lists the live catalog in the proxy's order (first row {rows[0] if rows else None!r}); "
                   "the setup flow's generic branch uses fetch_api_models and ignores fallback_models (upstream behavior)")
-        selected = cursor_line(term)
+        # Never accept an arbitrary catalog default: it may be an embedding,
+        # speech, or retiring model. Exercise the same explicit choice we document.
+        for _ in range(200):
+            selected = cursor_line(term)
+            if selected.split(")", 1)[-1].strip() == selected_model:
+                break
+            child.send(DOWN)
+            term.pump(quiet=0.15, limit=3.0)
+        else:
+            term.dump(f"could not highlight {selected_model}")
+            return 1
         print("highlighted:", selected.strip())
         child.send("\r")
         term.pump(quiet=1.0, limit=60.0)
@@ -149,7 +155,7 @@ def main() -> int:
     cfg = yaml.safe_load(open(os.path.join(os.environ["HERMES_HOME"], "config.yaml")))
     model = cfg.get("model")
     print("config.yaml model section:", model)
-    if isinstance(model, dict) and model.get("provider") == "tinfoil" and model.get("default"):
+    if isinstance(model, dict) and model.get("provider") == "tinfoil" and model.get("default") == selected_model:
         return 0
     print("config.yaml does not record provider tinfoil with a default model")
     return 1

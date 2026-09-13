@@ -13,12 +13,13 @@ it appears.
    `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/sh.tinfoil.proxy.plist`.
    The Tinfoil menu-bar Proxy app serves the same endpoint and works too.
    Every machine that runs Hermes needs its own proxy; it binds loopback only.
-2. **Set your API key** if the installer did not prompt for it:
-   `hermes config` (or `hermes setup`) and fill in `TINFOIL_API_KEY`.
-3. **Pick a model:** run `hermes model`, choose **Tinfoil**, choose a model.
-   Do this rather than editing `model.provider` by hand: a plugin provider
-   has no silent default model in upstream Hermes yet.
-4. **Verify:** `hermes doctor` probes the proxy's `/v1/models` (a failing
-   probe means the proxy is not running), and
-   `curl -s http://127.0.0.1:3301/verification-document` proves the
-   enclave attestation succeeded. A bound port alone does not.
+2. **Configure and pick a model:** run `hermes model`, choose **Tinfoil**,
+   enter `TINFOIL_API_KEY` when prompted, accept the local Base URL, and
+   select a chat model such as `kimi-k3`, `glm-5-3`, or `gpt-oss-120b`.
+   The picker saves your settings. Its unfiltered catalog also contains
+   embeddings and audio models; these are not agent chat models.
+3. **Verify:** `hermes doctor` checks whether the proxy returns a model list.
+   This does not prove your API key works: the list is public. Check whether
+   the proxy has finished checking the enclave with:
+   `curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3301/verification-document`.
+   An open port alone does not prove those checks have finished.

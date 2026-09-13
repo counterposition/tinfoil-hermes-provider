@@ -21,5 +21,7 @@ e2e/run.sh
   the container, so the plugin's default `base_url` is exercised unchanged.
 - Set `TINFOIL_API_KEY` to run the live conversation checks
   (`live_checks.py`); they are skipped otherwise.
-- `PLUGIN_ID` can point at a local clone (`file:///plugin`) to test
-  uncommitted changes; the installer warns about the `file://` scheme.
+- `PLUGIN_ID` can point at the mounted local clone (`file:///plugin`);
+  Git installs its committed HEAD, not uncommitted changes. The installer
+  warns about the `file://` scheme. The Python tests described in the main
+  README load the current working files directly.

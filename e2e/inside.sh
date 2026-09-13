@@ -93,13 +93,13 @@ if [ $proxy_live -eq 1 ]; then
   grep -iq "tinfoil" <<<"$doc_out" && obs "doctor mentions Tinfoil (exit $rc)" || obs "doctor does not mention Tinfoil at all (exit $rc)"
   grep -iE "tinfoil.*(ok|✓|reachable|healthy|[0-9]+ models)|✓.*tinfoil" <<<"$doc_out" >/dev/null \
     && pass "doctor probe passes with the proxy running" \
-    || obs "doctor did not report a passing Tinfoil probe with the proxy running"
+    || fail "doctor did not report a passing Tinfoil probe with the proxy running"
   kill "$fwd_pid" 2>/dev/null; wait "$fwd_pid" 2>/dev/null; sleep 0.3
   doc_down="$(hermes doctor 2>&1)"; rc2=$?
   grep -i "tinfoil" <<<"$doc_down" || true
-  grep -iE "tinfoil.*(fail|✗|❌|unreachable|refused|error|could not|not running)|(✗|❌|fail).*tinfoil" <<<"$doc_down" >/dev/null \
+  grep -iE "tinfoil.*(fail|✗|❌|unreachable|refused|error|could not|not running)|(⚠|✗|❌|fail).*tinfoil" <<<"$doc_down" >/dev/null \
     && pass "doctor reports Tinfoil unreachable when the proxy is down" \
-    || obs "doctor did not flag Tinfoil with the proxy down (exit $rc2)"
+    || fail "doctor did not flag Tinfoil with the proxy down (exit $rc2)"
   start_forwarder
 else
   skip "doctor probe (no proxy)"
