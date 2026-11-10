@@ -32,40 +32,26 @@ if _src:
 _tmp_home: Path | None = None
 
 
-def clear_provider_caches() -> None:
-    """The recipe from upstream's test_installed_plugin_discovery.py."""
-    import providers as _pkg
-
-    _pkg._REGISTRY.clear()
-    _pkg._ALIASES.clear()
-    _pkg._PROVIDER_LIST_CACHE = None
-    _pkg._discovered = False
-    for mod in list(sys.modules):
-        if mod.startswith(("plugins.model_providers", "_hermes_user_provider")):
-            del sys.modules[mod]
-
-
-def install_plugin_copy(hermes_home: Path) -> Path:
+def install_plugin_copy(hermes_home: Path) -> None:
     """Mirror what ``hermes plugins install`` leaves behind: a flat clone."""
     target = hermes_home / "plugins" / PLUGIN_DIR_NAME
-    if target.exists():
-        shutil.rmtree(target)
-    shutil.copytree(
-        REPO_ROOT,
-        target,
-        ignore=shutil.ignore_patterns(".git", "__pycache__", ".pytest_cache", ".venv"),
-    )
-    return target
+    target.mkdir(parents=True)
+    for filename in ("__init__.py", "plugin.yaml"):
+        shutil.copy2(REPO_ROOT / filename, target / filename)
 
 
 def pytest_configure(config):
     global _tmp_home
-    _tmp_home = Path(tempfile.mkdtemp(prefix="tinfoil-plugin-hermes-home-"))
+    home = tempfile.TemporaryDirectory(prefix="tinfoil-plugin-hermes-home-")
+    config.add_cleanup(home.cleanup)
+    _tmp_home = Path(home.name)
     install_plugin_copy(_tmp_home)
-    os.environ["HERMES_HOME"] = str(_tmp_home)
+    env = pytest.MonkeyPatch()
+    config.add_cleanup(env.undo)
+    env.setenv("HERMES_HOME", str(_tmp_home))
     # Never let a developer's real credentials leak into request-shape tests.
     for var in ("TINFOIL_API_KEY", "TINFOIL_BASE_URL"):
-        os.environ.pop(var, None)
+        env.delenv(var, raising=False)
     try:
         import providers  # noqa: F401
     except ImportError as exc:
@@ -74,12 +60,6 @@ def pytest_configure(config):
             "has hermes-agent's dependencies and set HERMES_AGENT_SRC to a "
             f"checkout (got {exc})."
         ) from exc
-    clear_provider_caches()
-
-
-def pytest_unconfigure(config):
-    if _tmp_home is not None:
-        shutil.rmtree(_tmp_home, ignore_errors=True)
 
 
 @pytest.fixture(scope="session")

@@ -8,6 +8,10 @@ precedence check, optional live conversation checks, and
 `hermes plugins remove`. The container has its own `HERMES_HOME`; nothing on
 the host is touched.
 
+Use a Hermes Agent checkout that supports Python 3.14. The container uses
+Hermes' lockfile for its runtime and this project's `e2e` dependency group
+for the terminal driver.
+
 ```bash
 HERMES_AGENT_SRC=~/c/vendor/hermes-agent \
 GH_TOKEN="$(gh auth token)" \

@@ -1,0 +1,12 @@
+[project]
+name = "tinfoil-hermes-provider"
+version = "1.0.0"
+requires-python = ">=3.14,<3.15"
+
+[dependency-groups]
+dev = ["pytest==9.2.0", "ruff==0.17.4"]
+e2e = ["pexpect==4.9.0", "pyte==0.8.2"]
+
+[tool.uv]
+# This environment contains only development and test tools.
+package = false

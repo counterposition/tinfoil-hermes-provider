@@ -24,7 +24,7 @@ git -C "$src" archive --format=tar HEAD | tar -x -C "$ctx"
 git -C "$src" rev-parse HEAD > "$ctx/.upstream-rev"
 echo "hermes-agent source: $src @ $(cat "$ctx/.upstream-rev")"
 
-docker build -q -f "$here/Dockerfile" --build-context "hermes=$ctx" -t tinfoil-hermes-e2e "$ctx"
+docker build -q -f "$here/Dockerfile" --build-context "hermes=$ctx" -t tinfoil-hermes-e2e "$repo"
 
 args=(--rm -e PLUGIN_ID -e GH_TOKEN -e PROXY_HOST -e TINFOIL_API_KEY
       -v "$repo:/plugin:ro")
@@ -33,4 +33,4 @@ if [ -n "${FORK_TINFOIL_DIR:-}" ]; then
 fi
 export PLUGIN_ID="${PLUGIN_ID:-counterposition/tinfoil-hermes-provider}"
 export PROXY_HOST="${PROXY_HOST-host.docker.internal}"
-exec docker run "${args[@]}" tinfoil-hermes-e2e bash /plugin/e2e/inside.sh
+docker run "${args[@]}" tinfoil-hermes-e2e bash /plugin/e2e/inside.sh

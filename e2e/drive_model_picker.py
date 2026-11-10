@@ -28,15 +28,15 @@ class Terminal:
 
     def pump(self, quiet: float = 0.4, limit: float = 30.0) -> None:
         """Feed output until the child has been quiet for ``quiet`` seconds."""
-        deadline = time.time() + limit
-        last = time.time()
-        while time.time() < deadline:
+        deadline = time.monotonic() + limit
+        last = time.monotonic()
+        while time.monotonic() < deadline:
             try:
                 data = self.child.read_nonblocking(65536, timeout=0.1)
                 self.stream.feed(data)
-                last = time.time()
+                last = time.monotonic()
             except pexpect.TIMEOUT:
-                if time.time() - last >= quiet:
+                if time.monotonic() - last >= quiet:
                     return
             except pexpect.EOF:
                 return
@@ -48,8 +48,8 @@ class Terminal:
         return "\n".join(self.lines())
 
     def wait_for(self, needle: str, limit: float = 45.0) -> bool:
-        deadline = time.time() + limit
-        while time.time() < deadline:
+        deadline = time.monotonic() + limit
+        while self.child.isalive() and time.monotonic() < deadline:
             self.pump(quiet=0.3, limit=2.0)
             if needle in self.text():
                 return True
@@ -68,11 +68,7 @@ def cursor_line(term: Terminal) -> str:
     return next((line for line in term.lines() if line.lstrip().startswith("→")), "")
 
 
-def main() -> int:
-    from providers import get_provider_profile
-
-    curated = get_provider_profile("tinfoil").fallback_models
-    selected_model = curated[0]
+def main(selected_model: str, expected_base_url: str = "http://127.0.0.1:3301/v1") -> int:
     env = dict(os.environ, TERM="xterm-256color", LINES=str(ROWS), COLUMNS=str(COLS))
     child = pexpect.spawn("hermes", ["model"], env=env, encoding="utf-8", timeout=60,
                           dimensions=(ROWS, COLS))
@@ -93,8 +89,8 @@ def main() -> int:
         print("highlighted:", selected.strip())
         child.send("\r")
 
-        deadline = time.time() + 45
-        while time.time() < deadline:
+        deadline = time.monotonic() + 45
+        while child.isalive() and time.monotonic() < deadline:
             term.pump(quiet=0.3, limit=2.0)
             text = term.text()
             if "[K]eep / [R]eplace / [C]lear" in text:
@@ -115,16 +111,13 @@ def main() -> int:
         prompt_line = next(line for line in term.lines() if "Base URL [" in line)
         default_base = prompt_line.split("Base URL [", 1)[1].split("]", 1)[0]
         print(f"prompted for Base URL, default {default_base!r}")
-        if not default_base.startswith("http://127.0.0.1:3301"):
+        if default_base.rstrip("/") != expected_base_url.rstrip("/"):
             return 1
         child.sendline("")
 
         if not term.wait_for(selected_model, limit=60):
             term.dump(f"model picker without {selected_model}")
             return 1
-        text = term.text()
-        seen = [m for m in curated if m in text]
-        print("model picker shows:", seen)
         rows = [line.split(")", 1)[1].strip() for line in term.lines() if "(○)" in line or "(●)" in line]
         if rows and rows[0] == selected_model:
             print("OBSERVED  hermes model lists curated fallbacks first")
@@ -144,22 +137,21 @@ def main() -> int:
             return 1
         print("highlighted:", selected.strip())
         child.send("\r")
-        term.pump(quiet=1.0, limit=60.0)
+        if term.wait_for("Select reasoning effort:", limit=10):
+            child.send("\r")
+        try:
+            child.expect(pexpect.EOF, timeout=20)
+        except pexpect.TIMEOUT:
+            term.pump()
+            term.dump("picker did not finish")
+            return 1
+        term.stream.feed(child.before)
         term.dump("after selection")
+        child.close()
+        return 0 if child.exitstatus == 0 else 1
     finally:
         if child.isalive():
             child.terminate(force=True)
 
-    import yaml
-
-    cfg = yaml.safe_load(open(os.path.join(os.environ["HERMES_HOME"], "config.yaml")))
-    model = cfg.get("model")
-    print("config.yaml model section:", model)
-    if isinstance(model, dict) and model.get("provider") == "tinfoil" and model.get("default") == selected_model:
-        return 0
-    print("config.yaml does not record provider tinfoil with a default model")
-    return 1
-
-
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(*sys.argv[1:]))

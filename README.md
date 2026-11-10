@@ -93,10 +93,9 @@ uses `gemma4-31b` through the same proxy, including when the main model is
 text-only. If you set your own provider or model under `auxiliary`, Hermes
 uses your choice instead.
 
-The September 13 catalog marks `deepseek-v4-flash` deprecated with a September
-15 retirement date. It is no longer in the backup list. Its replacement
-`deepseek-v4-1-flash` and `glm-5-3-flash` are currently experimental; live
-model lists from the proxy still show them, but the backup list does not.
+The backup list starts with `kimi-k3-1-pro` and follows
+[Tinfoil's stable chat catalog](https://docs.tinfoil.sh/models/chat). Check the
+live list for experimental models such as `deepseek-v4-1-flash`.
 
 ## Reasoning effort
 
@@ -106,8 +105,9 @@ map your setting to a value that [Tinfoil accepts](https://docs.tinfoil.sh/guide
 
 | Model | Accepted by Tinfoil | Hermes `reasoning.effort` sent as |
 | --- | --- | --- |
-| `kimi-k3`, `glm-5-3`, `glm-5-3-flash` | `low`, `high`, `max` | `none`, `minimal`, `low` → `low`; `medium`, `high` → `high`; `xhigh`, `max`, `ultra` → `max`. |
+| `kimi-k3-1-pro`, `glm-5-3`, `kimi-k3`, `glm-5-3-flash` | `low`, `high`, `max` | `none`, `minimal`, `low` → `low`; `medium`, `high` → `high`; `xhigh`, `max`, `ultra` → `max`. |
 | `gpt-oss-120b`, `gpt-oss-safeguard-120b` | `low`, `medium`, `high` | `none`, `minimal` → `low`; `xhigh`, `max`, `ultra` → `high`. |
+| `deepseek-v4-1-flash` | `none`, `low`, `high`, `xhigh`, `max` | `minimal`, `medium` → `low`; `ultra` → `max`; other values pass through. |
 | `deepseek-v4-flash`, `gemma4-31b` | `none` … `max` | Passed through; `ultra` → `max`. |
 | `llama3-3-70b` and unknown/new models | not specified here | No effort setting is sent; the server chooses its default. |
 
@@ -117,7 +117,7 @@ expensive default. Unset or invalid effort settings omit the field. Unknown
 model IDs do not inherit assumptions from similarly named models.
 
 Thinking comes back in a separate `reasoning` response field, which Hermes
-already handles. DeepSeek V4 Flash reasons only when effort is set.
+already handles.
 
 ## Installing
 
@@ -139,9 +139,9 @@ hermes -p <profile> plugins install counterposition/tinfoil-hermes-provider
 Upstream issue [#88143](https://github.com/NousResearch/hermes-agent/issues/88143)
 tracks profile creation not seeding `plugins/`.
 
-`hermes plugins list` shows the plugin with status "not enabled" and source
-"git". That status is the plugin manager's view and does not affect the
-provider; Tinfoil is selectable regardless.
+`hermes plugins list` shows the plugin as enabled with source "git" on
+Hermes v0.23.1. Tinfoil is selectable as soon as Hermes discovers the
+installed directory.
 
 **Verify.** `hermes doctor` probes the proxy's `/v1/models` once
 `TINFOIL_API_KEY` is set. With the proxy running it prints `✓ Tinfoil`; with
@@ -163,24 +163,24 @@ run `hermes model` to choose another provider. Remove its saved key with
 
 ## Development
 
-Validated against Hermes **0.21.2**, upstream commit
-[`205645ee4241`](https://github.com/NousResearch/hermes-agent/commit/205645ee424163c7b6cfc032c331c3557797497b)
-on September 13, 2026. Use a current Hermes checkout: this plugin relies on
-its provider hooks and `agent.reasoning_effort` helpers.
-
-The tests load the plugin through Hermes' real discovery path (a temporary
-`HERMES_HOME` with the repo copied to `plugins/tinfoil-provider/`), stub the
-proxy, and make no external network calls. They need a hermes-agent checkout
-with its dependencies installed:
+Use Python 3.14, [uv](https://docs.astral.sh/uv/), and a Hermes Agent
+checkout. The tests were verified with
+[Hermes Agent v0.23.1](https://github.com/NousResearch/hermes-agent/releases/tag/v0.23.1).
+They load the plugin from a temporary `HERMES_HOME` and use a local mock
+proxy. From the plugin repository, run:
 
 ```bash
-HERMES_AGENT_SRC=~/c/vendor/hermes-agent
-"$HERMES_AGENT_SRC/scripts/run_tests.sh" "$PWD/tests" -q
+export HERMES_AGENT_SRC=~/c/vendor/hermes-agent
+(
+  set -e
+  deps="$(mktemp)"
+  trap 'rm -f "$deps"' EXIT
+  uv export --project dev --locked --only-group dev --format requirements.txt > "$deps"
+  PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --project "$HERMES_AGENT_SRC" \
+    --frozen --no-dev --with-requirements "$deps" python -m pytest -q
+)
+uv run --project dev --locked ruff check .
 ```
-
-Hermes' runner runs each test file separately and removes real credentials
-from the test environment. The tests check plugin loading, request settings,
-user choices, model lists, connection checks, image analysis, and old Hermes imports.
 
 `e2e/` holds a container harness (Docker or OrbStack) that installs the
 plugin into an upstream checkout with the real `hermes plugins install` and

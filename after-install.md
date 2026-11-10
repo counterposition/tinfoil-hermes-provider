@@ -15,7 +15,7 @@ it appears.
    Every machine that runs Hermes needs its own proxy; it binds loopback only.
 2. **Configure and pick a model:** run `hermes model`, choose **Tinfoil**,
    enter `TINFOIL_API_KEY` when prompted, accept the local Base URL, and
-   select a chat model such as `kimi-k3`, `glm-5-3`, or `gpt-oss-120b`.
+   select a chat model such as `kimi-k3-1-pro`, `glm-5-3`, or `gpt-oss-120b`.
    The picker saves your settings. Its unfiltered catalog also contains
    embeddings and audio models; these are not agent chat models.
 3. **Verify:** `hermes doctor` checks whether the proxy returns a model list.

@@ -8,10 +8,9 @@ with the OpenAI SDK through the proxy.
 
 from __future__ import annotations
 
-import json
 import sys
 
-FAMILIES = ("kimi-k3", "glm-5-3", "deepseek-v4-flash", "gpt-oss-120b")
+MODELS = ("kimi-k3-1-pro", "glm-5-3", "gpt-oss-120b", "deepseek-v4-1-flash")
 TOOL = {
     "type": "function",
     "function": {
@@ -27,16 +26,15 @@ TOOL = {
 
 
 def main() -> int:
-    from openai import OpenAI
-
     from hermes_cli.runtime_provider import resolve_runtime_provider
+    from openai import OpenAI
     from providers import get_provider_profile
 
     profile = get_provider_profile("tinfoil")
     failures = 0
 
     # §7.2 resolution evidence: the provider actually resolved to the proxy URL.
-    runtime = resolve_runtime_provider(requested="tinfoil", target_model=FAMILIES[0])
+    runtime = resolve_runtime_provider(requested="tinfoil", target_model=MODELS[0])
     print("resolved:", {k: runtime.get(k) for k in ("provider", "api_mode", "base_url")})
     if runtime.get("base_url") != profile.base_url:
         print("FAIL resolution: base_url is not the proxy")
@@ -45,13 +43,15 @@ def main() -> int:
 
     # §7.3 context length from the proxy catalog.
     catalog = {m.id: m for m in client.models.list().data}
-    ctx = getattr(catalog.get("deepseek-v4-flash"), "context_window", None)
-    print("deepseek-v4-flash context_window:", ctx)
-    if ctx != 1048576:
-        print("OBSERVED context_window differs from the 2026-08-23 snapshot")
+    experimental = "deepseek-v4-1-flash"
+    ctx = getattr(catalog.get(experimental), "context_window", None)
+    print(f"{experimental} context_window:", ctx)
 
     # §7.4 multi-turn tool calling per family, with §7.5 effort clamps (xhigh).
-    for model in FAMILIES:
+    for model in MODELS:
+        if model == experimental and model not in catalog:
+            print(f"SKIP {model}: experimental model absent from the catalog")
+            continue
         _, extras = profile.build_api_kwargs_extras(reasoning_config={"effort": "xhigh"}, model=model)
         messages = [
             {"role": "system", "content": "Use the read_file tool when asked about a file. Be brief."},

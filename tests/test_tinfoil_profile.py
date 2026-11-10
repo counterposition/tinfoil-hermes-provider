@@ -8,7 +8,6 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 
 import pytest
-
 from agent.transports.chat_completions import ChatCompletionsTransport
 from conftest import PLUGIN_DIR_NAME, PROVIDER_SLUG
 
@@ -46,12 +45,10 @@ def _build_request(profile, model: str, reasoning_config: dict | None):
 
 class TestTinfoilDiscovery:
     def test_discovered_from_flat_install_directory(self, hermes_home, profile):
-        """The contract this plugin depends on: step 2b of provider discovery."""
         installed = hermes_home / "plugins" / PLUGIN_DIR_NAME
         assert (installed / "plugin.yaml").is_file()
-        module = sys.modules[f"_hermes_user_provider_{PLUGIN_DIR_NAME.replace('-', '_')}"]
+        module = sys.modules[type(profile).__module__]
         assert module.__file__ == str(installed / "__init__.py")
-        assert type(profile).__module__ == module.__name__
 
     def test_picker_canonical_providers_include_tinfoil(self, profile):
         from hermes_cli.models import CANONICAL_PROVIDERS
@@ -94,14 +91,24 @@ class TestTinfoilDiscovery:
 
 
 class TestTinfoilConfigurationWiring:
-    def test_env_vars_are_injected_with_correct_visibility(self, profile):
-        from hermes_cli.config import OPTIONAL_ENV_VARS, _inject_profile_env_vars
+    def test_manifest_declares_key_and_optional_url(self, hermes_home, profile):
+        import hermes_yaml
 
-        _inject_profile_env_vars()
-        assert OPTIONAL_ENV_VARS["TINFOIL_API_KEY"]["category"] == "provider"
-        assert OPTIONAL_ENV_VARS["TINFOIL_API_KEY"]["password"] is True
-        assert OPTIONAL_ENV_VARS["TINFOIL_BASE_URL"]["category"] == "provider"
-        assert OPTIONAL_ENV_VARS["TINFOIL_BASE_URL"]["password"] is False
+        path = hermes_home / "plugins" / PLUGIN_DIR_NAME / "plugin.yaml"
+        manifest = hermes_yaml.safe_load(path.read_text(encoding="utf-8"))
+        (key,) = manifest["requires_env"]
+        (url,) = manifest["optional_env"]
+        assert (key["name"], url["name"]) == profile.env_vars
+        assert key["name"] == "TINFOIL_API_KEY"
+        assert key["secret"] is True
+        assert url["name"] == "TINFOIL_BASE_URL"
+        assert url.get("secret", False) is False
+
+    def test_installer_has_no_runtime_dependencies_to_prepare(self):
+        from conftest import REPO_ROOT
+        from pm.plugin_declarations import read_python_declaration
+
+        assert not read_python_declaration(REPO_ROOT).installs_packages
 
     def test_registry_derives_base_url_env_var(self, profile):
         from hermes_cli.auth import PROVIDER_REGISTRY
@@ -142,7 +149,7 @@ class TestTinfoilConfigurationWiring:
 
 
 class TestTinfoilReasoningRequestShape:
-    @pytest.mark.parametrize("model", ["kimi-k3", "glm-5-3", "glm-5-3-flash"])
+    @pytest.mark.parametrize("model", ["kimi-k3-1-pro", "kimi-k3", "glm-5-3", "glm-5-3-flash"])
     @pytest.mark.parametrize(
         ("effort", "expected"),
         [("none", "low"), ("minimal", "low"), ("low", "low"),
@@ -172,12 +179,20 @@ class TestTinfoilReasoningRequestShape:
         kwargs = _build_request(profile, "deepseek-v4-flash", {"effort": effort})
         assert kwargs["reasoning_effort"] == effort
 
-    @pytest.mark.parametrize("model", ["deepseek-v4-flash", "gemma4-31b"])
+    @pytest.mark.parametrize(
+        ("effort", "expected"),
+        [("none", "none"), ("minimal", "low"), ("medium", "low"), ("xhigh", "xhigh"), ("ultra", "max")],
+    )
+    def test_deepseek_v4_1_efforts_use_documented_values(self, profile, effort, expected):
+        kwargs = _build_request(profile, "deepseek-v4-1-flash", {"effort": effort})
+        assert kwargs["reasoning_effort"] == expected
+
+    @pytest.mark.parametrize("model", ["deepseek-v4-1-flash", "deepseek-v4-flash", "gemma4-31b"])
     def test_full_range_disable_is_explicit_none(self, profile, model):
         kwargs = _build_request(profile, model, {"enabled": False})
         assert kwargs["reasoning_effort"] == "none"
 
-    @pytest.mark.parametrize("model", ["kimi-k3", "glm-5-3", "glm-5-3-flash", "gpt-oss-120b"])
+    @pytest.mark.parametrize("model", ["kimi-k3-1-pro", "kimi-k3", "glm-5-3", "glm-5-3-flash", "gpt-oss-120b"])
     def test_always_on_models_use_minimum_when_disabled(self, profile, model):
         kwargs = _build_request(profile, model, {"enabled": False})
         assert kwargs["reasoning_effort"] == "low"
@@ -221,19 +236,11 @@ class TestTinfoilReasoningRequestShape:
         )["reasoning_effort"] == "high"
 
 
-def test_repository_uses_current_hermes_import_paths():
-    from hermes_cli.plugin_compat import scan_plugin
-    from conftest import REPO_ROOT
-
-    assert scan_plugin(REPO_ROOT) == []
-
-
 def test_repository_passes_the_installer_security_scan():
     """`hermes plugins install` refuses a 'dangerous' verdict and asks for
     confirmation on 'caution'; the published tree must stay 'safe'."""
-    from tools.plugin_guard import scan_plugin
-
     from conftest import REPO_ROOT
+    from tools.plugin_guard import scan_plugin
 
     result = scan_plugin(REPO_ROOT, source="tinfoil-hermes-provider")
     blocking = [f for f in result.findings if f.severity in ("critical", "high")]

@@ -43,9 +43,26 @@ def models() -> int:
     return 0
 
 
-def description(expected: str) -> int:
+def default_model() -> int:
     from providers import get_provider_profile
+
+    print(get_provider_profile(SLUG).fallback_models[0])
+    return 0
+
+
+def selected_model(expected: str) -> int:
+    from hermes_cli.config import load_config
+
+    model = load_config().get("model")
+    print("config.yaml model section:", model)
+    if isinstance(model, dict) and model.get("provider") == SLUG and model.get("default") == expected:
+        return 0
+    return 1
+
+
+def description(expected: str) -> int:
     from hermes_cli.models import CANONICAL_PROVIDERS
+    from providers import get_provider_profile
 
     profile = get_provider_profile(SLUG)
     entry = next((p for p in CANONICAL_PROVIDERS if p.slug == SLUG), None)
@@ -56,8 +73,8 @@ def description(expected: str) -> int:
 
 
 def absent() -> int:
-    from providers import get_provider_profile
     from hermes_cli.models import CANONICAL_PROVIDERS
+    from providers import get_provider_profile
 
     profile = get_provider_profile(SLUG)
     entries = [p for p in CANONICAL_PROVIDERS if p.slug == SLUG]

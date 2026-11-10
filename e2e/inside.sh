@@ -65,17 +65,17 @@ grep -q "plugins enable tinfoil-provider" <<<"$install_out" \
 grep -q "TINFOIL_API_KEY" <<<"$install_out" && obs "installer mentioned TINFOIL_API_KEY (requires_env)"
 
 section "2. hermes plugins list"
-list_out="$(hermes plugins list 2>&1)"; echo "$list_out"
+list_out="$(hermes plugins list --plain --no-bundled 2>&1)"; echo "$list_out"
 grep -q "tinfoil-provider" <<<"$list_out" && pass "plugin listed" || fail "plugin not listed"
-row="$(grep -A1 "tinfoil-provider" <<<"$list_out" | tr -s ' ')"
-grep -q "not enabled" <<<"$row" && obs "list shows the plugin as 'not enabled' (plugin-manager status; no kind column)" \
-  || obs "list row: $row"
 
 section "3. hermes model: picker contents"
 python "$CHECKS" canonical && pass "CANONICAL_PROVIDERS contains slug 'tinfoil'" || fail "slug 'tinfoil' missing from picker list"
 if [ $proxy_live -eq 1 ]; then
   python "$CHECKS" models && pass "model list = curated fallbacks first, then live catalog" || fail "model list merge"
-  python /plugin/e2e/drive_model_picker.py && pass "interactive 'hermes model' selected Tinfoil, prompted for key and Base URL, listed live models" \
+  model="$(python "$CHECKS" default_model)" \
+    && /opt/e2e-venv/bin/python /plugin/e2e/drive_model_picker.py "$model" \
+    && python "$CHECKS" selected_model "$model" \
+    && pass "interactive 'hermes model' selected Tinfoil, prompted for key and Base URL, listed live models" \
     || fail "interactive 'hermes model' drive (see transcript above)"
 else
   skip "live model list and interactive picker (no proxy)"
