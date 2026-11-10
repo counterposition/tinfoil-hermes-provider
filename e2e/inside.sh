@@ -66,7 +66,9 @@ grep -q "TINFOIL_API_KEY" <<<"$install_out" && obs "installer mentioned TINFOIL_
 
 section "2. hermes plugins list"
 list_out="$(hermes plugins list --plain --no-bundled 2>&1)"; echo "$list_out"
-grep -q "tinfoil-provider" <<<"$list_out" && pass "plugin listed" || fail "plugin not listed"
+grep -Eq '^enabled[[:space:]].*[[:space:]]tinfoil-provider$' <<<"$list_out" \
+  && pass "model provider listed as enabled by default" \
+  || fail "model provider missing or not listed as enabled by default"
 
 section "3. hermes model: picker contents"
 python "$CHECKS" canonical && pass "CANONICAL_PROVIDERS contains slug 'tinfoil'" || fail "slug 'tinfoil' missing from picker list"

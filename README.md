@@ -1,4 +1,7 @@
-# Tinfoil provider for Hermes Agent
+# Tinfoil for Hermes Agent
+
+A model provider plugin for confidential inference via Tinfoil’s local
+attestation proxy.
 
 [Tinfoil](https://tinfoil.sh/) runs open models inside attested confidential
 enclaves: the provider cannot read your prompts or the model's outputs. That
@@ -21,7 +24,7 @@ API key when prompted, accept the local Base URL, and select a chat model.
 The picker saves your settings. `hermes config` displays configuration;
 it does not prompt for a key.
 
-## Prerequisite: the local proxy is the provider
+## Run the local Tinfoil proxy
 
 Install and run `tinfoil-proxy` on every machine that runs Hermes. The proxy
 binds loopback only (`127.0.0.1:3301`), so a proxy on one machine does not
@@ -124,10 +127,8 @@ already handles.
 `hermes plugins install` clones this repository into
 `$HERMES_HOME/plugins/tinfoil-provider/`. Hermes' provider registry imports
 any directory there whose `plugin.yaml` declares `kind: model-provider`, so
-the provider is live on the next `hermes` invocation. The generic installer
-still ends with "Plugin installed but not enabled. Run `hermes plugins enable
-tinfoil-provider` to activate." That hint applies to plugin-manager plugins,
-not model providers; enabling is harmless but does nothing here.
+Tinfoil is available on the next `hermes` invocation. If the installer
+prints a generic `hermes plugins enable` hint, proceed to `hermes model`.
 
 **Per profile.** Each Hermes profile has its own `HERMES_HOME`, so install
 once per profile that should see Tinfoil:
