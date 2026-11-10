@@ -9,7 +9,7 @@ from threading import Thread
 
 import pytest
 from agent.transports.chat_completions import ChatCompletionsTransport
-from conftest import PLUGIN_DIR_NAME, PROVIDER_SLUG
+from conftest import PLUGIN_DIR_NAME, PROVIDER_SLUG, install_plugin_copy
 
 
 class _ModelsHandler(BaseHTTPRequestHandler):
@@ -97,12 +97,16 @@ class TestTinfoilConfigurationWiring:
         path = hermes_home / "plugins" / PLUGIN_DIR_NAME / "plugin.yaml"
         manifest = hermes_yaml.safe_load(path.read_text(encoding="utf-8"))
         (key,) = manifest["requires_env"]
-        (url,) = manifest["optional_env"]
+        url, *proxy_settings = manifest["optional_env"]
         assert (key["name"], url["name"]) == profile.env_vars
         assert key["name"] == "TINFOIL_API_KEY"
         assert key["secret"] is True
         assert url["name"] == "TINFOIL_BASE_URL"
-        assert url.get("secret", False) is False
+        # Only the key is a secret; the rest are plain settings.
+        assert not any(entry.get("secret", False) for entry in (url, *proxy_settings))
+        assert {entry["name"] for entry in proxy_settings} == {
+            "TINFOIL_PROXY_BIN", "TINFOIL_PROXY_ARGS", "TINFOIL_PROXY_AUTOSTART",
+        }
 
     def test_installer_has_no_runtime_dependencies_to_prepare(self):
         from conftest import REPO_ROOT
@@ -121,8 +125,9 @@ class TestTinfoilConfigurationWiring:
     def test_runtime_resolution_honors_base_url_env(self, profile, monkeypatch, tmp_path):
         from hermes_cli.runtime_provider import resolve_runtime_provider
 
+        # Providers are per Hermes home, so a second home needs its own install.
         hermes_home = tmp_path / "hermes-home"
-        hermes_home.mkdir()
+        install_plugin_copy(hermes_home)
         monkeypatch.setenv("HERMES_HOME", str(hermes_home))
         monkeypatch.setenv("TINFOIL_BASE_URL", "http://127.0.0.1:43999/v1/")
 

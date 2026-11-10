@@ -1,14 +1,23 @@
 name: tinfoil-provider
 kind: model-provider
-version: 1.0.0
-description: Tinfoil confidential inference via the local tinfoil-proxy
+version: 2.0.0
+manifest_version: 2
+description: Tinfoil confidential inference via the local tinfoil-proxy, started on demand
 author: Harish Kukreja
 homepage: https://github.com/counterposition/tinfoil-hermes-provider
+license: MIT
+tags: [models, confidential-computing, tinfoil]
 requires_env:
   - name: TINFOIL_API_KEY
     description: Tinfoil API key (forwarded per-request to the enclave)
-    url: https://tinfoil.sh/
+    url: https://dash.tinfoil.sh/
     secret: true
 optional_env:
   - name: TINFOIL_BASE_URL
     description: Override the local tinfoil-proxy URL (default http://127.0.0.1:3301/v1)
+  - name: TINFOIL_PROXY_BIN
+    description: Path to the tinfoil-proxy binary when it is not on PATH
+  - name: TINFOIL_PROXY_ARGS
+    description: Extra tinfoil-proxy flags for the proxy Hermes starts, e.g. to pin an enclave
+  - name: TINFOIL_PROXY_AUTOSTART
+    description: Set to 0 to stop Hermes from starting tinfoil-proxy itself
