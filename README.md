@@ -19,18 +19,12 @@ locally running [`tinfoil-proxy`](https://docs.tinfoil.sh/local-proxy/cli),
 which performs that verification and forwards plain OpenAI-compatible
 requests. Hermes itself never talks to Tinfoil directly.
 
-```bash
-hermes plugins install counterposition/tinfoil-hermes-provider
-```
-
-Answer `y` when the installer asks to enable it. **Tinfoil** then appears in
-`hermes model`, `/model`, `hermes setup`, and `hermes doctor`, with no file
-placement and no core patch (see [Installing](#installing)).
+Once installed and enabled (see [Installing](#installing)), **Tinfoil**
+appears in `hermes model`, `/model`, `hermes setup`, and `hermes doctor`.
 
 Run **`hermes model`**, choose **Tinfoil**, enter your API key when prompted,
 accept the local Base URL, and select a model. The picker saves your
-settings. `hermes config` displays configuration; it does not prompt for a
-key.
+settings.
 
 ### The local proxy starts itself
 
@@ -48,8 +42,6 @@ waits until it has finished attestation.
 - The proxy attests against the public transparency log, so **startup needs
   network**. If it cannot attest, Hermes reports a connection error. The
   plugin never falls back to an unverified connection.
-- The proxy is started without Hermes' API keys in its environment. Your
-  Tinfoil key reaches it per request, as it always has.
 - Set `TINFOIL_PROXY_AUTOSTART=0` to manage the proxy yourself. A proxy that
   is already running is used as it is: Tinfoil's menu-bar Proxy app serves the
   same endpoint, and `scripts/sh.tinfoil.proxy.plist` is a macOS LaunchAgent
@@ -64,42 +56,30 @@ A bound port is not proof of attestation. This is:
 curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3301/verification-document
 ```
 
-### The direct endpoint, and why this plugin does not use it
-
-Tinfoil also documents a direct endpoint, `https://inference.tinfoil.sh/v1`,
-reachable with a plain Bearer key. Tinfoil's own page on it says direct access
-skips the attestation verification its SDKs perform, offers no protection
-against man-in-the-middle attacks, and is meant for debugging and simple
-testing only. Pointing `TINFOIL_BASE_URL` there works, but you get a provider
-named Tinfoil with none of Tinfoil's value. This plugin will never default to
-it.
+Tinfoil's direct endpoint, `https://inference.tinfoil.sh/v1`, skips
+attestation; Tinfoil documents it for debugging only. Pointing
+`TINFOIL_BASE_URL` at it works but forfeits Tinfoil's guarantees, and the
+plugin never defaults to it.
 
 ### Configuration
 
 | Variable | Required | Meaning |
 | --- | --- | --- |
 | `TINFOIL_API_KEY` | yes | Your Tinfoil API key. The proxy forwards it per request as Bearer auth; the proxy itself takes no key. |
-| `TINFOIL_BASE_URL` | no | Override the proxy URL. Default `http://127.0.0.1:3301/v1`. Legitimate uses: a non-default proxy port, or a proxy on another host on a private network (the hop from Hermes to that proxy is then outside the attested path, and Hermes will not start it for you). |
+| `TINFOIL_BASE_URL` | no | Override the proxy URL. Default `http://127.0.0.1:3301/v1`. For a non-default port, or a proxy on a private host (that hop is not attested, and Hermes will not start it). |
 | `TINFOIL_PROXY_BIN` | no | Path to `tinfoil-proxy` when it is not in one of the usual places. |
 | `TINFOIL_PROXY_ARGS` | no | Extra `tinfoil-proxy` flags for the proxy Hermes starts, for example `-e inference.tinfoil.sh -r tinfoilsh/confidential-model-router` to pin an enclave and its config repository. |
 | `TINFOIL_PROXY_AUTOSTART` | no | `0` stops Hermes from starting the proxy. |
 
-`hermes model` prompts for the key and optional Base URL; the installer also
-prompts for `TINFOIL_API_KEY` when run interactively. Use the picker to choose
-both the provider and model. Setting only `model.provider: tinfoil` by hand
-is not enough: Hermes does not yet choose a model automatically for plugins.
+Setting only `model.provider: tinfoil` by hand is not enough: Hermes does not
+yet choose a model automatically for plugins, so use the picker.
 
 ### Models
 
 The pickers show the chat models in
 [Tinfoil's catalog](https://docs.tinfoil.sh/models/chat) that support tool
 calling. Embeddings, speech, safety and retired models are left out; you can
-still use one by typing its ID. To see the same list:
-
-```bash
-curl -fsS --max-time 10 http://127.0.0.1:3301/v1/models \
-  | jq -r '.data[] | select(.type == "chat" and .tool_calling == true and .deprecated != true) | .id'
-```
+still use one by typing its ID.
 
 The plugin reads each model's context window, image support and reasoning
 levels from that catalog and remembers the last catalog it saw. A model
@@ -115,26 +95,17 @@ choice instead.
 ### Reasoning effort
 
 Tinfoil takes `reasoning_effort` as a top-level request field, and the
-accepted values differ per model. The plugin maps your Hermes setting to a
-value [Tinfoil accepts](https://docs.tinfoil.sh/guides/reasoning), using the
-levels the catalog lists for the model. As of this release:
-
-| Model | Accepted by Tinfoil | Hermes `reasoning.effort` sent as |
-| --- | --- | --- |
-| `kimi-k3-1-pro`, `glm-5-3` | `low`, `high`, `max` | `none`, `minimal`, `low` → `low`; `medium`, `high` → `high`; `xhigh`, `max`, `ultra` → `max`. |
-| `gpt-oss-120b` | `low`, `medium`, `high` | `none`, `minimal` → `low`; `xhigh`, `max`, `ultra` → `high`. |
-| `deepseek-v4-1-flash` | `none`, `low`, `high`, `xhigh`, `max` | `minimal`, `medium` → `low`; `ultra` → `max`; other values pass through. |
-| `gemma4-31b` | `none` … `max` | Passed through; `ultra` → `max`. |
-| `llama3-3-70b` | none | No effort setting is sent. |
+accepted values differ per model. The plugin clamps your Hermes
+`reasoning.effort` to the levels the catalog lists for the model (see
+[Tinfoil's reasoning guide](https://docs.tinfoil.sh/guides/reasoning)). For
+models that accept exactly `low`, `high` and `max`, `medium` rounds up to
+`high` and `xhigh` to `max`. Models with no levels get no effort field.
 
 Disabling reasoning sends `none` where supported, otherwise the model's
 lowest level: always-on models cannot stop thinking, and omitting the field
 can select their most expensive default. Unset or invalid effort settings omit
 the field. A model the plugin has never seen in a catalog gets no effort
 setting, and does not inherit assumptions from similarly named models.
-
-Thinking comes back in a separate `reasoning` response field, which Hermes
-already handles.
 
 ## Run tools in a Tinfoil Container
 
@@ -163,8 +134,7 @@ From then on `terminal`, `execute_code` and the file tools run inside
 `my-box`. Each connection is opened with `tinfoil ssh`, which carries SSH over
 the enclave's attested TLS connection, so verifying the enclave and connecting
 to it are one step. There is no host key to accept and nothing is written to
-`~/.ssh`. The verified connection is kept open between commands and closed
-after five idle minutes.
+`~/.ssh`.
 
 You need:
 
@@ -207,9 +177,6 @@ What to expect:
   this machine, so the plugin rewrites those paths before the tool runs.
 - The backend runs in-process only (`plugins.isolation: in_process`, the
   default), like every terminal backend plugin.
-- Tested against a live Tinfoil Container built from the workspace template
-  above: terminal commands, Python, and the read, write, search and patch
-  file tools.
 
 ## What the plugins do on your machine
 
@@ -219,12 +186,9 @@ What to expect:
   (`127.0.0.1:3301`, or `TINFOIL_BASE_URL`), including a `/v1/models`
   request for the model list. The proxy is what contacts Tinfoil: it fetches
   and checks the enclave's attestation, then forwards inference.
-- **Background process.** When Hermes needs Tinfoil and nothing listens on
-  the proxy's port, the plugin starts the `tinfoil-proxy` binary you
-  installed, in its own session, and leaves it running after Hermes exits.
-  Its output goes to `proxy.log` in the plugin's data directory under
-  `$HERMES_HOME`. It never downloads a binary.
-  `TINFOIL_PROXY_AUTOSTART=0` turns this off.
+- **Background process.** The autostarted `tinfoil-proxy` described in
+  [The local proxy starts itself](#the-local-proxy-starts-itself), run in its
+  own session.
 - **Credentials.** `TINFOIL_API_KEY` comes from Hermes' configuration and is
   sent to the proxy as the request's bearer token. The proxy starts without
   any environment variable ending in `_API_KEY`, `_TOKEN`, `_SECRET`,
@@ -241,9 +205,8 @@ What to expect:
 - **Background process.** An SSH control socket under the system temp
   directory (`hermes-tinfoil/`) keeps the verified connection open for five
   idle minutes.
-- **Tool arguments.** A `pre_tool_call` hook rewrites a leading `~` in
-  file-tool paths to the container's home, only while
-  `terminal.backend` is `tinfoil`.
+- **Tool arguments.** A `pre_tool_call` hook does the `~` rewrite described
+  above, only while `terminal.backend` is `tinfoil`.
 
 Neither plugin sends telemetry or contacts any service other than Tinfoil.
 
@@ -269,17 +232,11 @@ hermes -p <profile> plugins install counterposition/tinfoil-hermes-provider
 Upstream issue [#88143](https://github.com/NousResearch/hermes-agent/issues/88143)
 tracks profile creation not seeding `plugins/`.
 
-**Verify.** `hermes doctor` probes the proxy's `/v1/models` once
-`TINFOIL_API_KEY` is set. With the proxy running it prints `✓ Tinfoil`; with
-the proxy down it prints `⚠ Tinfoil ([Errno 111] Connection refused)`. Doctor
-does not start the proxy; `hermes model` and any chat do. A passing catalog
-probe establishes reachability, not API-key validity or successful inference:
-the proxy's catalog is public. Check `/verification-document` to see whether
-the proxy has finished checking the enclave.
-
-Under `plugins.isolation: host` Hermes loads this provider in-process and
-logs a warning, because the provider checks the proxy when Hermes builds a
-client.
+**Verify.** Once `TINFOIL_API_KEY` is set, `hermes doctor` reports whether the
+proxy is reachable. Doctor does not start the proxy; `hermes model` and any
+chat do. A passing check proves reachability, not that your key is valid: the
+proxy's catalog is public. Check `/verification-document` to see whether the
+proxy has finished checking the enclave.
 
 ## Removing
 
