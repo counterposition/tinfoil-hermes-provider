@@ -1,32 +1,47 @@
 # Tinfoil for Hermes Agent
 
-Two plugins that keep a Hermes session inside Tinfoil's attested enclaves:
+[Tinfoil](https://tinfoil.sh/inference) runs open models such as Kimi, GLM
+and gpt-oss inside hardware enclaves: neither the cloud host nor Tinfoil can
+read your prompts or the replies. This plugin adds Tinfoil as a model
+provider in Hermes. Before any prompt leaves your machine, Tinfoil's local
+proxy checks the enclave's attestation, and if that check fails the request
+is refused rather than sent anywhere else. The proxy starts itself when
+Hermes needs it, and the model list comes live from Tinfoil.
 
-| Plugin | What it adds | Install |
-| --- | --- | --- |
-| `tinfoil-provider` | **Tinfoil** as a model provider: confidential inference through Tinfoil's local attestation proxy. | `hermes plugins install counterposition/tinfoil-hermes-provider` |
-| `tinfoil-sandbox` | A `tinfoil` terminal backend: Hermes' terminal, file and code tools run inside a [Tinfoil Container](https://tinfoil.sh/containers). | `hermes plugins install counterposition/tinfoil-hermes-provider/sandbox` |
+## Quick start
 
-They are independent. Install either one, or both.
+You need a Tinfoil API key ([dashboard](https://dash.tinfoil.sh/)),
+[`tinfoil-proxy`](https://docs.tinfoil.sh/local-proxy/cli) installed, and
+Hermes v0.23.1 or later.
 
-## Model provider
+```bash
+hermes plugins install counterposition/tinfoil-hermes-provider
+```
 
-[Tinfoil](https://tinfoil.sh/inference) runs open models inside attested
-confidential enclaves: the provider cannot read your prompts or the model's
-outputs. That property only holds when the **client** verifies the enclave's
-attestation on every connection, so this plugin routes Hermes through the
-locally running [`tinfoil-proxy`](https://docs.tinfoil.sh/local-proxy/cli),
-which performs that verification and forwards plain OpenAI-compatible
-requests. Hermes itself never talks to Tinfoil directly.
+Answer `y` when it asks to enable the plugin. Then run:
 
-Once installed and enabled (see [Installing](#installing)), **Tinfoil**
-appears in `hermes model`, `/model`, `hermes setup`, and `hermes doctor`.
+```bash
+hermes model
+```
+
+Choose **Tinfoil**, paste your API key, accept the local Base URL, and pick a
+model. Tinfoil now appears in `hermes model`, `/model`, `hermes setup` and
+`hermes doctor`.
 
 ![Installing the plugin and answering y to enable it, choosing Tinfoil in hermes model with the API key masked, picking kimi-k3-1-pro from the live model list, then one chat turn answered by the model](docs/install.gif)
 
-Run **`hermes model`**, choose **Tinfoil**, enter your API key when prompted,
-accept the local Base URL, and select a model. The picker saves your
-settings.
+Want the agent's terminal, file and code tools sealed in an enclave too? A
+second plugin in this repository does that: see
+[Run tools in a Tinfoil Container](#run-tools-in-a-tinfoil-container).
+
+## Model provider
+
+Tinfoil's privacy guarantee only holds when the **client** verifies the
+enclave's attestation on every connection. This plugin therefore routes
+Hermes through the locally running
+[`tinfoil-proxy`](https://docs.tinfoil.sh/local-proxy/cli), which performs
+that verification and forwards plain OpenAI-compatible requests. Hermes
+itself never talks to Tinfoil directly.
 
 ### The local proxy starts itself
 
