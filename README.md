@@ -211,6 +211,42 @@ What to expect:
   above: terminal commands, Python, and the read, write, search and patch
   file tools.
 
+## What the plugins do on your machine
+
+**`tinfoil-provider`**
+
+- **Network.** Hermes sends requests only to the local proxy
+  (`127.0.0.1:3301`, or `TINFOIL_BASE_URL`), including a `/v1/models`
+  request for the model list. The proxy is what contacts Tinfoil: it fetches
+  and checks the enclave's attestation, then forwards inference.
+- **Background process.** When Hermes needs Tinfoil and nothing listens on
+  the proxy's port, the plugin starts the `tinfoil-proxy` binary you
+  installed, in its own session, and leaves it running after Hermes exits.
+  Its output goes to `proxy.log` in the plugin's data directory under
+  `$HERMES_HOME`. It never downloads a binary.
+  `TINFOIL_PROXY_AUTOSTART=0` turns this off.
+- **Credentials.** `TINFOIL_API_KEY` comes from Hermes' configuration and is
+  sent to the proxy as the request's bearer token. The proxy starts without
+  any environment variable ending in `_API_KEY`, `_TOKEN`, `_SECRET`,
+  `_PASSWORD` or `_ADMIN_KEY`.
+
+**`tinfoil-sandbox`**
+
+- **Commands.** Every terminal, file and code tool call runs
+  `tinfoil ssh`, which runs your OpenSSH client. The Tinfoil CLI contacts
+  Tinfoil's control plane to look the container up, then the enclave
+  itself. The plugin passes `TINFOIL_API_KEY` to the CLI as the tunnel key,
+  and `TINFOIL_ADMIN_KEY` if you set one in Hermes. It never reads the
+  CLI's saved login.
+- **Background process.** An SSH control socket under the system temp
+  directory (`hermes-tinfoil/`) keeps the verified connection open for five
+  idle minutes.
+- **Tool arguments.** A `pre_tool_call` hook rewrites a leading `~` in
+  file-tool paths to the container's home, only while
+  `terminal.backend` is `tinfoil`.
+
+Neither plugin sends telemetry or contacts any service other than Tinfoil.
+
 ## Installing
 
 `hermes plugins install` clones this repository into
