@@ -22,6 +22,8 @@ requests. Hermes itself never talks to Tinfoil directly.
 Once installed and enabled (see [Installing](#installing)), **Tinfoil**
 appears in `hermes model`, `/model`, `hermes setup`, and `hermes doctor`.
 
+![Installing the plugin and answering y to enable it, choosing Tinfoil in hermes model with the API key masked, picking kimi-k3-1-pro from the live model list, then one chat turn answered by the model](docs/install.gif)
+
 Run **`hermes model`**, choose **Tinfoil**, enter your API key when prompted,
 accept the local Base URL, and select a model. The picker saves your
 settings.
