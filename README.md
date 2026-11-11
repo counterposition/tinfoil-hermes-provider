@@ -23,6 +23,8 @@ requests. Hermes itself never talks to Tinfoil directly.
 hermes plugins install counterposition/tinfoil-hermes-provider
 ```
 
+![Installing the plugin and answering y to enable it, choosing Tinfoil in hermes model with the API key masked, picking kimi-k3-1-pro from the live model list, then one chat turn answered by the model](docs/install.gif)
+
 After that, **Tinfoil** appears in `hermes model`, `/model`, `hermes setup`,
 and `hermes doctor`. No file placement, no core patch, and no
 `hermes plugins enable` step (see [Installing](#installing)).
