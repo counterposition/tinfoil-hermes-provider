@@ -1,13 +1,18 @@
 # Tinfoil Container backend installed
 
-1. **Enable it:** `hermes plugins enable tinfoil-sandbox`.
-2. **Install the Tinfoil CLI** (https://docs.tinfoil.sh/containers/cli) and
-   run `tinfoil login` once so it can look your container up by name.
-3. **Name the container:** `hermes config set terminal.tinfoil_container <name>`.
-   The container must serve SSH and authorize your key
-   (https://github.com/tinfoilsh/confidential-ubuntu is a ready workspace).
-4. **Select the backend:** `hermes config set terminal.backend tinfoil`.
+If you declined the "Enable now?" question, run
+`hermes plugins enable tinfoil-sandbox` first.
+
+1. **Install the Tinfoil CLI** (https://docs.tinfoil.sh/containers/cli) and
+   sign it in to your organization once with `tinfoil login`.
+2. **Create a workspace container.** The template at
+   https://github.com/counterposition/hermes-tinfoil-workspace sets one up:
+   copy it, put your SSH public key in its config, publish a release, then
+   `tinfoil container create`. Its README has the commands.
+3. **Point Hermes at it:**
+   `hermes config set terminal.tinfoil_container <name>`, then
+   `hermes config set terminal.backend tinfoil`.
 
 Hermes' terminal, file and code tools then run inside that enclave. Each
-connection is verified by `tinfoil ssh`; `TINFOIL_API_KEY` is passed to the
-enclave's tunnel. `hermes doctor` shows what is still missing.
+connection is verified by `tinfoil ssh`, using your `TINFOIL_API_KEY` for
+the enclave's tunnel. `hermes doctor` shows what is still missing.
