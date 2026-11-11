@@ -10,7 +10,7 @@ from typing import Any
 
 from agent.terminal_env_provider import TerminalEnvironmentProvider
 
-from .environment import Target, tunnel_key
+from .environment import Target, remote_home, tunnel_key
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +66,35 @@ def configured_target() -> Target | None:
         identity_file=_setting(terminal, "identity_file", "TINFOIL_CONTAINER_IDENTITY_FILE"),
         allow_debug=_setting(terminal, "allow_debug", "TINFOIL_CONTAINER_ALLOW_DEBUG").lower() in _TRUE,
     )
+
+
+# Tools whose ``path`` argument Hermes resolves on this machine before the backend sees it.
+_PATH_TOOLS = frozenset({"read_file", "write_file", "patch", "search_files"})
+
+
+def container_home_paths(tool_name: str = "", args: dict | None = None, **_: Any) -> dict | None:
+    """``pre_tool_call`` hook: point a ``~`` path at the container's home.
+
+    Hermes expands ``~`` in file-tool paths with this machine's home for every
+    container-style backend, so ``~/notes.md`` would land in a ``/Users/...``
+    directory created inside the container. Rewriting the argument to the home
+    the container login actually has keeps ``~`` meaning the same thing for the
+    file tools as for the terminal.
+    """
+    if tool_name not in _PATH_TOOLS or not isinstance(args, dict):
+        return None
+    path = args.get("path")
+    if not isinstance(path, str) or not (path == "~" or path.startswith("~/")):
+        return None
+    from hermes_cli.config import load_config_readonly
+
+    terminal = load_config_readonly().get("terminal")
+    if not isinstance(terminal, dict) or str(terminal.get("backend") or "").strip().lower() != "tinfoil":
+        return None
+    target = configured_target()
+    if target is None:
+        return None
+    return {"action": "modify", "args": {"path": remote_home(target) + path[1:]}}
 
 
 def _problems() -> list[str]:

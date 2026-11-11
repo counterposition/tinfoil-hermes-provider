@@ -39,6 +39,15 @@ _READY = "hermes-tinfoil-ready"
 # on stderr, before every command: e.g. `level=info msg="No SSH port known for box, trying 22"`.
 _PORT_FALLBACK = re.compile(r"No SSH port known for \S+, trying (\d+)")
 
+# The home directory each container's login resolved to, keyed by (container, user).
+_homes: dict[tuple[str, str], str] = {}
+
+
+def remote_home(target: Target) -> str:
+    """The login user's home inside the container: as detected on connect, else the usual one."""
+    return _homes.get((target.container, target.user)) or (
+        "/root" if target.user == "root" else f"/home/{target.user}")
+
 
 @dataclass(frozen=True)
 class Target:
@@ -104,8 +113,10 @@ class TinfoilContainerEnvironment(BaseEnvironment):
         identity = "|".join(map(str, (target.container, target.repo, target.user, target.ssh_port)))
         self.control_socket = control_dir / f"{hashlib.sha256(identity.encode()).hexdigest()[:16]}.sock"
         self._connect()
+        home = self._remote_home()
+        _homes[(target.container, target.user)] = home
         if self.cwd == "~":
-            self.cwd = self._remote_home()
+            self.cwd = home
         self.init_session()
 
     # ── Command construction ─────────────────────────────────────────────
@@ -169,7 +180,7 @@ class TinfoilContainerEnvironment(BaseEnvironment):
             home = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
             if result.returncode == 0 and home.startswith("/"):
                 return home
-        return "/root" if self.target.user == "root" else f"/home/{self.target.user}"
+        return remote_home(self.target)
 
     # ── BaseEnvironment contract ─────────────────────────────────────────
 

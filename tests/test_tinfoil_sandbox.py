@@ -190,6 +190,21 @@ def test_cli_port_notice_stays_out_of_tool_output(environment, cli):
     assert later[later.index("--port") + 1] == "22"  # the port the CLI fell back to, pinned
 
 
+def test_file_tool_tilde_paths_mean_the_container_home(environment, home, tmp_path):
+    # Hermes expands ``~`` in file-tool paths with this machine's home; the plugin's
+    # pre_tool_call hook rewrites it to the home the container login resolved.
+    from hermes_cli.plugins import _dispatch_pre_tool_call_hooks
+
+    container_home = str(tmp_path / "container-home")
+    _, args = _dispatch_pre_tool_call_hooks("write_file", {"path": "~/health/report.py", "content": "x"})
+    assert args == {"path": container_home + "/health/report.py", "content": "x"}
+    assert _dispatch_pre_tool_call_hooks("read_file", {"path": "/etc/hostname"})[1] is None
+    assert _dispatch_pre_tool_call_hooks("terminal", {"command": "ls ~"})[1] is None
+
+    _write_config(home)  # another backend selected: paths are left alone
+    assert _dispatch_pre_tool_call_hooks("read_file", {"path": "~/notes.md"})[1] is None
+
+
 def test_working_directory_and_exports_persist_between_commands(environment):
     assert environment.execute("mkdir -p project && cd project && export GREETING=hi")["returncode"] == 0
     result = environment.execute("echo $GREETING in $(basename $PWD)")

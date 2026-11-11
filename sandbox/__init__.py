@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from .provider import TinfoilSandboxProvider
+from .provider import TinfoilSandboxProvider, container_home_paths
 
 logger = logging.getLogger(__name__)
 
@@ -19,3 +19,4 @@ def register(ctx) -> None:
         logger.warning("tinfoil-sandbox: this Hermes has no terminal backend plugins; update Hermes.")
         return
     ctx.register_terminal_environment_provider(TinfoilSandboxProvider())
+    ctx.register_hook("pre_tool_call", container_home_paths)

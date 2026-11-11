@@ -15,7 +15,7 @@ description: >
   `terminal.tinfoil_container`.
 requires_hermes: ">=0.23.0"
 provides_tools: []
-provides_hooks: []
+provides_hooks: [pre_tool_call]
 config_keys:
   - terminal.tinfoil_container
   - terminal.tinfoil_repo
