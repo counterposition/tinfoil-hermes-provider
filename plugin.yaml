@@ -7,6 +7,7 @@ author: Harish Kukreja
 homepage: https://github.com/counterposition/tinfoil-hermes-provider
 license: MIT
 tags: [models, confidential-computing, tinfoil]
+requires_hermes: ">=0.23.1"
 requires_env:
   - name: TINFOIL_API_KEY
     description: Tinfoil API key (forwarded per-request to the enclave)
