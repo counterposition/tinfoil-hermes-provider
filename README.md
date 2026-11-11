@@ -170,10 +170,12 @@ You need:
 
 - The [Tinfoil CLI](https://docs.tinfoil.sh/containers/cli) (`tinfoil`) and an
   OpenSSH client on the machine that runs Hermes.
-- A running container that serves SSH and authorizes your key. Tinfoil's
-  [confidential-ubuntu](https://github.com/tinfoilsh/confidential-ubuntu)
-  repository is a workspace image built for this; its config lists the
-  authorized keys, so they are part of what is attested.
+- A running container that serves SSH and authorizes your key. The
+  [hermes-tinfoil-workspace](https://github.com/counterposition/hermes-tinfoil-workspace)
+  template sets one up: a small Ubuntu workspace with Python and git. Copy
+  it, put your SSH public key in its config, publish a release and create
+  the container; its README has the commands. The authorized keys are part
+  of the measured config, so the attestation also covers who can log in.
 - `tinfoil login` done once, so the CLI can look the container up by name.
   To skip the lookup, set `terminal.tinfoil_container` to the enclave's
   hostname and `terminal.tinfoil_repo` to its config repository.
@@ -200,10 +202,14 @@ What to expect:
   `tinfoil container get`.
 - Skills and files cached under `~/.hermes` on your machine are not copied
   into the container.
+- `~` in a file-tool path means the home directory inside the container, as
+  it does in the terminal. Hermes would otherwise expand it to your home on
+  this machine, so the plugin rewrites those paths before the tool runs.
 - The backend runs in-process only (`plugins.isolation: in_process`, the
   default), like every terminal backend plugin.
-- This backend was developed against the CLI's source and a stand-in CLI. It
-  has not yet been run against a live Tinfoil Container.
+- Tested against a live Tinfoil Container built from the workspace template
+  above: terminal commands, Python, and the read, write, search and patch
+  file tools.
 
 ## Installing
 

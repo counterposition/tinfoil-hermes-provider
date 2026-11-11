@@ -33,5 +33,10 @@ Requirements, settings and limits are in the
   CLI verifies the enclave's attestation and tunnels SSH over that verified
   TLS connection. An SSH control socket under the system temp directory keeps
   the connection open between commands.
+- The first connection also pins the SSH port. Without it the CLI logs a
+  port notice before every command, and that line would corrupt the output
+  Hermes' file tools parse.
+- A `pre_tool_call` hook rewrites a leading `~` in file-tool paths to the
+  container's home, which Hermes would otherwise take from this machine.
 - The plugin has no Python dependencies and makes no network calls of its
   own. It runs two programs you installed: `tinfoil` and `ssh`.
