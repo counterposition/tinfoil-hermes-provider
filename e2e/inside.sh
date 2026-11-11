@@ -51,7 +51,7 @@ section "hermes version"
 ver="$(hermes --version 2>&1)"; printf "%s\n" "$ver" | sed -n 1,2p; echo "upstream rev: $(cat /opt/hermes-agent/.upstream-rev)"
 
 section "1. hermes plugins install ${PLUGIN_ID}"
-install_out="$(hermes plugins install "$PLUGIN_ID" 2>&1 </dev/null)"; rc=$?
+install_out="$(hermes plugins install --enable "$PLUGIN_ID" 2>&1 </dev/null)"; rc=$?
 echo "$install_out"
 [ $rc -eq 0 ] && pass "install exit code 0" || fail "install exit code $rc"
 [ -f "$HERMES_HOME/plugins/tinfoil-provider/plugin.yaml" ] \
@@ -59,16 +59,15 @@ echo "$install_out"
   || fail "no plugin.yaml at \$HERMES_HOME/plugins/tinfoil-provider/"
 grep -q "Tinfoil provider installed" <<<"$install_out" \
   && pass "after-install.md was printed" || fail "after-install.md not printed"
-grep -q "plugins enable tinfoil-provider" <<<"$install_out" \
-  && obs "installer still prints the generic 'hermes plugins enable' hint" \
-  || obs "installer did not print the 'hermes plugins enable' hint"
+grep -q "Plugin tinfoil-provider enabled" <<<"$install_out" \
+  && pass "--enable enabled the provider" || fail "installer did not enable the provider"
 grep -q "TINFOIL_API_KEY" <<<"$install_out" && obs "installer mentioned TINFOIL_API_KEY (requires_env)"
 
 section "2. hermes plugins list"
 list_out="$(hermes plugins list --plain --no-bundled 2>&1)"; echo "$list_out"
 grep -Eq '^enabled[[:space:]].*[[:space:]]tinfoil-provider$' <<<"$list_out" \
-  && pass "model provider listed as enabled by default" \
-  || fail "model provider missing or not listed as enabled by default"
+  && pass "model provider listed as enabled" \
+  || fail "model provider missing or not listed as enabled"
 
 section "3. hermes model: picker contents"
 python "$CHECKS" canonical && pass "CANONICAL_PROVIDERS contains slug 'tinfoil'" || fail "slug 'tinfoil' missing from picker list"
@@ -127,7 +126,7 @@ python "$CHECKS" absent && pass "Tinfoil gone from registry and picker in a fres
 
 section "6. precedence: installed plugin beats a bundled copy"
 if [ -d /bundled-tinfoil ]; then
-  hermes plugins install "$PLUGIN_ID" >/dev/null 2>&1 </dev/null || fail "reinstall for the precedence check"
+  hermes plugins install --enable "$PLUGIN_ID" >/dev/null 2>&1 </dev/null || fail "reinstall for the precedence check"
   mkdir -p /opt/hermes-agent/plugins/model-providers/tinfoil
   cp /bundled-tinfoil/__init__.py /bundled-tinfoil/plugin.yaml /opt/hermes-agent/plugins/model-providers/tinfoil/
   sed -i 's/description="Tinfoil — confidential inference in verified enclaves (local proxy)"/description="Tinfoil (E2E-EDITED installed copy)"/' \

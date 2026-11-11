@@ -23,9 +23,9 @@ requests. Hermes itself never talks to Tinfoil directly.
 hermes plugins install counterposition/tinfoil-hermes-provider
 ```
 
-After that, **Tinfoil** appears in `hermes model`, `/model`, `hermes setup`,
-and `hermes doctor`. No file placement, no core patch, and no
-`hermes plugins enable` step (see [Installing](#installing)).
+Answer `y` when the installer asks to enable it. **Tinfoil** then appears in
+`hermes model`, `/model`, `hermes setup`, and `hermes doctor`, with no file
+placement and no core patch (see [Installing](#installing)).
 
 Run **`hermes model`**, choose **Tinfoil**, enter your API key when prompted,
 accept the local Base URL, and select a model. The picker saves your
@@ -214,14 +214,14 @@ What to expect:
 ## Installing
 
 `hermes plugins install` clones this repository into
-`$HERMES_HOME/plugins/tinfoil-provider/`. Hermes' provider registry imports
-any directory there whose `plugin.yaml` declares `kind: model-provider`, so
-Tinfoil is available on the next `hermes` invocation. If the installer
-prints a generic `hermes plugins enable` hint, proceed to `hermes model`.
+`$HERMES_HOME/plugins/tinfoil-provider/` and asks whether to enable it.
+Answer `y`: Hermes loads only enabled plugins, and without this one
+`hermes model` has no Tinfoil entry. If you answered `n`, run
+`hermes plugins enable tinfoil-provider`.
 
 The `/sandbox` form installs only that subdirectory, as
-`$HERMES_HOME/plugins/tinfoil-sandbox/`. It is a terminal backend, which
-Hermes loads only after `hermes plugins enable tinfoil-sandbox`.
+`$HERMES_HOME/plugins/tinfoil-sandbox/`. Enable it the same way
+(`hermes plugins enable tinfoil-sandbox`).
 
 **Per profile.** Each Hermes profile has its own `HERMES_HOME`, so install
 once per profile that should see Tinfoil:
