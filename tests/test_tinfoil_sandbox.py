@@ -27,6 +27,11 @@ with open(os.environ["STAND_IN_RECORD"], "a") as out:
 if os.environ.get("STAND_IN_REFUSE"):
     sys.stderr.write("attestation verification failed: measurement mismatch\\n")
     sys.exit(1)
+if "--port" not in args[:args.index("--")]:
+    # The real CLI logs this before every command when the container record has no SSH port.
+    sys.stderr.write('time="2026-11-10T22:44:19-05:00" level=info '
+                     'msg="No SSH port known for ' + args[1] + ', trying 22"\\n')
+    sys.stderr.flush()
 rest = args[args.index("--") + 1:]
 while rest and rest[0].startswith("-"):
     rest = rest[2:]
@@ -162,12 +167,27 @@ def test_commands_run_in_the_container_through_the_attested_tunnel(environment, 
 
     for call in cli():
         argv = call["argv"]
-        assert argv[:6] == ["ssh", "my-box", "--user", "root", "--repo", "acme/workspace@v1.2.0"]
+        assert argv[:4] == ["ssh", "my-box", "--user", "root"]
+        assert argv[argv.index("--repo") + 1] == "acme/workspace@v1.2.0"
         assert "--allow-debug" not in argv
         assert call["tunnel_key"] == "tk_inference_key"
         ssh_options = argv[argv.index("--") + 1:]
         assert "BatchMode=yes" in ssh_options  # never waits on a prompt
         assert "ControlMaster=auto" in ssh_options  # one verified connection, reused
+
+
+def test_cli_port_notice_stays_out_of_tool_output(environment, cli):
+    # Hermes' file tools parse command output; a stray CLI log line in front of it made
+    # read_file report a written file as empty and search_files report grep as missing.
+    from tools.file_operations import ShellFileOperations
+
+    files = ShellFileOperations(environment)
+    assert not files.write_file("hello.py", "print(sum(range(1, 101)))\n").error
+    read = files.read_file("hello.py")
+    assert read.error is None and "print(sum(range(1, 101)))" in read.content
+    assert "level=info" not in environment.execute("echo ok")["output"]
+    later = cli()[-1]["argv"]
+    assert later[later.index("--port") + 1] == "22"  # the port the CLI fell back to, pinned
 
 
 def test_working_directory_and_exports_persist_between_commands(environment):

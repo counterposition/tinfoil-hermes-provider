@@ -13,6 +13,7 @@ import contextlib
 import hashlib
 import logging
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -34,6 +35,9 @@ _MULTIPLEX = os.name != "nt"
 # The first connection fetches and checks the enclave's attestation.
 _CONNECT_TIMEOUT = 120
 _READY = "hermes-tinfoil-ready"
+# When the container record has no SSH port, the CLI logs which port it falls back to,
+# on stderr, before every command: e.g. `level=info msg="No SSH port known for box, trying 22"`.
+_PORT_FALLBACK = re.compile(r"No SSH port known for \S+, trying (\d+)")
 
 
 @dataclass(frozen=True)
@@ -90,6 +94,7 @@ class TinfoilContainerEnvironment(BaseEnvironment):
     def __init__(self, cli: str, target: Target, cwd: str = "~", timeout: int = 60):
         super().__init__(cwd=cwd, timeout=timeout)
         self.cli, self.target = cli, target
+        self.ssh_port = target.ssh_port  # pinned after the first connection when unset
         if not shutil.which("ssh"):
             raise RuntimeError("The OpenSSH client (ssh) is not installed or not in PATH.")
         control_dir = Path(tempfile.gettempdir()) / "hermes-tinfoil"
@@ -106,7 +111,9 @@ class TinfoilContainerEnvironment(BaseEnvironment):
     # ── Command construction ─────────────────────────────────────────────
 
     def _ssh_options(self) -> list[str]:
-        options = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=30"]
+        # LogLevel=ERROR: ssh's own notices would otherwise land in command output,
+        # which Hermes' file tools parse.
+        options = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=30", "-o", "LogLevel=ERROR"]
         if _MULTIPLEX:
             options += ["-o", f"ControlPath={self.control_socket}",
                         "-o", "ControlMaster=auto", "-o", "ControlPersist=300"]
@@ -117,8 +124,8 @@ class TinfoilContainerEnvironment(BaseEnvironment):
     def _command(self, remote: list[str]) -> list[str]:
         target = self.target
         argv = [self.cli, "ssh", target.container, "--user", target.user]
-        if target.ssh_port:
-            argv += ["--port", str(target.ssh_port)]
+        if self.ssh_port:
+            argv += ["--port", str(self.ssh_port)]
         if target.repo:
             argv += ["--repo", target.repo]
         if target.allow_debug:
@@ -150,6 +157,11 @@ class TinfoilContainerEnvironment(BaseEnvironment):
             raise EnvironmentConnectionError(
                 f"Could not open a verified connection to Tinfoil container {name}: {detail}",
                 retry_hint=hint)
+        # Pass the port the CLI fell back to from now on, so its log line stops
+        # appearing in front of every command's output.
+        fallback = _PORT_FALLBACK.search(result.stderr or "")
+        if not self.ssh_port and fallback:
+            self.ssh_port = int(fallback.group(1))
 
     def _remote_home(self) -> str:
         with contextlib.suppress(Exception):
