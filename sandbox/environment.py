@@ -72,16 +72,57 @@ def tunnel_key() -> str:
     return ""
 
 
-def client_env() -> dict[str, str]:
-    """Environment for the local ``tinfoil`` client. Nothing here reaches the container."""
+def admin_key() -> str:
+    """The admin key the CLI uses for the control plane, resolved the way the CLI does:
+    ``TINFOIL_ADMIN_KEY``, else an ``admin_`` key in ``TINFOIL_API_KEY``."""
     from agent.secret_scope import get_secret
 
-    env = dict(os.environ)
+    admin = (get_secret("TINFOIL_ADMIN_KEY") or "").strip()
+    if admin:
+        return admin
+    api_key = (get_secret("TINFOIL_API_KEY") or "").strip()
+    return api_key if api_key.startswith("admin_") else ""
+
+
+# What the ``tinfoil`` CLI and OpenSSH need from Hermes' environment. Hermes' process
+# environment can hold every provider's API key, so nothing else is passed on.
+_INHERITED = frozenset({
+    "PATH", "HOME", "USER", "LOGNAME", "TMPDIR",
+    # Locale, by name: a prefix match would also pass e.g. LC_SERVICE_TOKEN.
+    "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "LC_COLLATE", "LC_MESSAGES",
+    "LC_MONETARY", "LC_NUMERIC", "LC_TIME",
+    "SSH_AUTH_SOCK", "SSL_CERT_FILE", "SSL_CERT_DIR",
+    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
+    # The CLI's own settings that are not credentials.
+    "TINFOIL_CONTROLPLANE_URL", "TINFOIL_CONFIG",
+})
+# Windows: sockets need SYSTEMROOT, and Go and OpenSSH find the home directory
+# (with the CLI's saved login and ~/.ssh) through USERPROFILE.
+_INHERITED_WINDOWS = frozenset({
+    "SYSTEMROOT", "WINDIR", "USERPROFILE", "USERNAME", "PROGRAMDATA", "TEMP", "TMP", "PATHEXT",
+})
+
+
+def inherited_env(environ=os.environ, *, windows: bool = os.name == "nt") -> dict[str, str]:
+    """The allowlisted part of ``environ``, with no credentials in it."""
+    if windows:  # variable names are case-insensitive there
+        allowed = {name.upper() for name in _INHERITED | _INHERITED_WINDOWS}
+        return {name: value for name, value in environ.items() if name.upper() in allowed}
+    return {name: value for name, value in environ.items() if name in _INHERITED}
+
+
+def client_env() -> dict[str, str]:
+    """Environment for the local ``tinfoil`` CLI: the allowlist plus the Tinfoil keys it needs.
+
+    The keys are for the CLI and the enclave's tunnel; the remote shell gets none of this
+    unless the user's own SSH config forwards variables (``SendEnv``).
+    """
+    env = inherited_env()
     env["TINFOIL_NO_UPDATE_CHECK"] = "1"
     key = tunnel_key()
     if key:
         env["TINFOIL_TUNNEL_API_KEY"] = key
-    admin = (get_secret("TINFOIL_ADMIN_KEY") or "").strip()
+    admin = admin_key()
     if admin:
         env["TINFOIL_ADMIN_KEY"] = admin
     return env
@@ -196,6 +237,7 @@ class TinfoilContainerEnvironment(BaseEnvironment):
         with contextlib.suppress(OSError, subprocess.SubprocessError):
             subprocess.run(
                 ["ssh", "-o", f"ControlPath={self.control_socket}", "-O", "exit", "tinfoil-container"],
-                capture_output=True, timeout=5, stdin=subprocess.DEVNULL, check=False)
+                capture_output=True, timeout=5, stdin=subprocess.DEVNULL, check=False,
+                env=inherited_env())
         with contextlib.suppress(OSError):
             self.control_socket.unlink()

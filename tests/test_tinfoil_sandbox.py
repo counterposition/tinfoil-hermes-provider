@@ -13,18 +13,20 @@ from conftest import SANDBOX_DIR, SANDBOX_PLUGIN
 
 # Stands in for the tinfoil CLI. ``tinfoil ssh <container> ... -- <ssh options> <command>``
 # records how it was called, then runs the command the way sshd would: the
-# remote words joined with spaces and handed to a shell.
+# remote words joined with spaces and handed to a shell. Its record and refusal
+# files are baked in, since the plugin passes the CLI only an allowlisted environment.
 STAND_IN = '''#!{python}
 import json, os, sys
 
 args = sys.argv[1:]
-with open(os.environ["STAND_IN_RECORD"], "a") as out:
+with open({record!r}, "a") as out:
     out.write(json.dumps({{
         "argv": args,
         "tunnel_key": os.environ.get("TINFOIL_TUNNEL_API_KEY", ""),
         "admin_key": os.environ.get("TINFOIL_ADMIN_KEY", ""),
+        "env": dict(os.environ),
     }}) + "\\n")
-if os.environ.get("STAND_IN_REFUSE"):
+if os.path.exists({refuse!r}):
     sys.stderr.write("attestation verification failed: measurement mismatch\\n")
     sys.exit(1)
 if "--port" not in args[:args.index("--")]:
@@ -86,19 +88,31 @@ def backend(home):
     return provider
 
 
+class StandIn:
+    """The stand-in CLI: ``cli()`` lists its calls, ``cli.refuse()`` makes it fail attestation."""
+
+    def __init__(self, directory: Path):
+        self.binary = directory / "tinfoil"
+        self.record = directory / "calls.jsonl"
+        self.refusal = directory / "refuse"
+        self.binary.write_text(STAND_IN.format(
+            python=sys.executable, record=str(self.record), refuse=str(self.refusal)), encoding="utf-8")
+        self.binary.chmod(self.binary.stat().st_mode | stat.S_IXUSR)
+
+    def __call__(self):
+        if not self.record.exists():
+            return []
+        return [json.loads(line) for line in self.record.read_text().splitlines()]
+
+    def refuse(self):
+        self.refusal.touch()
+
+
 @pytest.fixture
 def cli(tmp_path, monkeypatch):
-    binary = tmp_path / "tinfoil"
-    binary.write_text(STAND_IN.format(python=sys.executable), encoding="utf-8")
-    binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
-    record = tmp_path / "calls.jsonl"
-    monkeypatch.setenv("TINFOIL_CLI", str(binary))
-    monkeypatch.setenv("STAND_IN_RECORD", str(record))
-
-    def calls():
-        return [json.loads(line) for line in record.read_text().splitlines()] if record.exists() else []
-
-    return calls
+    stand_in = StandIn(tmp_path)
+    monkeypatch.setenv("TINFOIL_CLI", str(stand_in.binary))
+    return stand_in
 
 
 
@@ -228,7 +242,7 @@ def test_refused_attestation_is_a_connection_failure_not_a_command_result(
     from tools.environments.base import EnvironmentConnectionError
 
     _select(home, tinfoil_container="my-box")
-    monkeypatch.setenv("STAND_IN_REFUSE", "1")
+    cli.refuse()
     with pytest.raises(EnvironmentConnectionError) as failure:
         backend.create_environment(cwd="~", timeout=30)
     assert "measurement mismatch" in failure.value.reason
@@ -237,15 +251,74 @@ def test_refused_attestation_is_a_connection_failure_not_a_command_result(
 
 def test_admin_key_is_never_sent_as_the_tunnel_key(home, backend, cli, monkeypatch):
     monkeypatch.setenv("TINFOIL_API_KEY", "admin_org_key")
-    monkeypatch.setenv("STAND_IN_REFUSE", "1")
+    cli.refuse()
     _select(home, tinfoil_container="my-box", tinfoil_user="app", tinfoil_ssh_port=2022,
             tinfoil_allow_debug=True)
     with pytest.raises(RuntimeError):
         backend.create_environment(cwd="~", timeout=30)
     [call] = cli()
     assert call["tunnel_key"] == ""
+    # The CLI itself accepts an admin key in TINFOIL_API_KEY for the control plane.
+    assert call["admin_key"] == "admin_org_key"
+    assert "TINFOIL_API_KEY" not in call["env"]
     assert call["argv"][:7] == ["ssh", "my-box", "--user", "app", "--port", "2022", "--allow-debug"]
     assert backend.doctor_checks()[2][0] is False
+
+
+def test_only_allowlisted_variables_reach_the_cli(home, backend, cli, monkeypatch):
+    # Hermes' process environment holds every provider's key; the CLI and ssh get none of them.
+    leaked = {
+        "OPENROUTER_API_KEY": "sk-or-secret",
+        "ANTHROPIC_API_KEY": "sk-ant-secret",
+        "GITHUB_TOKEN": "ghp_secret",
+        "TINFOIL_API_KEY": "tk_inference_key",
+        "TINFOIL_SOMETHING_SECRET": "unknown-tinfoil-setting",
+        "BASH_ENV": "/nonexistent/startup.sh",
+        "LC_SERVICE_TOKEN": "looks-like-a-locale",
+    }
+    kept = {
+        "SSH_AUTH_SOCK": "/tmp/agent.sock",
+        "LC_MESSAGES": "C",
+        "no_proxy": ".internal",
+        "SSL_CERT_FILE": "/etc/ssl/cert.pem",
+        "TINFOIL_CONTROLPLANE_URL": "https://controlplane.example",
+    }
+    for name, value in {**leaked, **kept}.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("TINFOIL_ADMIN_KEY", "admin_org_key")
+    _select(home, tinfoil_container="my-box")
+    environment = backend.create_environment(cwd="~", timeout=30, task_id="t-env")
+    try:
+        # A command with stdin goes through Hermes' spawn helper, the connect step through _capture.
+        assert environment.execute("cat > env.txt", stdin_data="x\n")["returncode"] == 0
+    finally:
+        environment.cleanup()
+        for leftover in (environment._snapshot_path, environment._cwd_file):
+            Path(leftover).unlink(missing_ok=True)
+
+    calls = cli()
+    assert len(calls) >= 2
+    for call in calls:
+        env = call["env"]
+        assert not set(leaked) & set(env), sorted(set(leaked) & set(env))
+        assert {name: env.get(name) for name in kept} == kept
+        assert env["PATH"] and env["HOME"]
+        assert env["TINFOIL_TUNNEL_API_KEY"] == "tk_inference_key"
+        assert env["TINFOIL_ADMIN_KEY"] == "admin_org_key"
+        assert env["TINFOIL_NO_UPDATE_CHECK"] == "1"
+
+
+def test_windows_allowlist_ignores_case_and_keeps_what_windows_needs(backend):
+    environment_module = sys.modules[type(backend).__module__.rsplit(".", 1)[0] + ".environment"]
+    windows = {
+        "Path": r"C:\Windows\System32", "SystemRoot": r"C:\Windows", "USERPROFILE": r"C:\Users\me",
+        "TEMP": r"C:\Temp", "PATHEXT": ".EXE", "https_proxy": "http://proxy:3128",
+        "OPENAI_API_KEY": "sk-secret", "ComSpec": r"C:\Windows\cmd.exe",
+    }
+    assert set(environment_module.inherited_env(windows, windows=True)) == {
+        "Path", "SystemRoot", "USERPROFILE", "TEMP", "PATHEXT", "https_proxy"}
+    # Elsewhere names are case-sensitive and the Windows additions do not apply.
+    assert set(environment_module.inherited_env(windows, windows=False)) == {"https_proxy"}
 
 
 def test_sandbox_plugin_installs_without_dependencies_and_passes_the_scan():

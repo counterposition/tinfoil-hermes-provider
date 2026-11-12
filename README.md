@@ -220,7 +220,12 @@ What to expect:
   `tinfoil ssh`, which runs your OpenSSH client. The Tinfoil CLI contacts
   Tinfoil's control plane to look the container up, then the enclave
   itself. The plugin passes `TINFOIL_API_KEY` to the CLI as the tunnel key,
-  and `TINFOIL_ADMIN_KEY` if you set one in Hermes. It never reads the
+  and your admin key if you set one in Hermes (`TINFOIL_ADMIN_KEY`, or an
+  `admin_` key in `TINFOIL_API_KEY`, which the CLI also accepts). Otherwise
+  the CLI and SSH get only an allowlist of Hermes' environment: `PATH`, home
+  and temp directories, user, locale, the SSH agent socket, certificate
+  locations, HTTP proxy settings, the CLI's `TINFOIL_CONTROLPLANE_URL` and
+  `TINFOIL_CONFIG`, plus Windows system directories. It never reads the
   CLI's saved login.
 - **Background process.** An SSH control socket under the system temp
   directory (`hermes-tinfoil/`) keeps the verified connection open for five
