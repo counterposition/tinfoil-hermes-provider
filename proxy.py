@@ -29,8 +29,18 @@ INSTALL_URL = "https://docs.tinfoil.sh/local-proxy/cli"
 _BINARY = "tinfoil-proxy"
 _LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 _OFF = {"0", "false", "no", "off"}
-# A proxy outlives the Hermes process that started it, so it gets no agent secrets.
-_SECRET_SUFFIXES = ("_API_KEY", "_TOKEN", "_SECRET", "_PASSWORD", "_ADMIN_KEY")
+# A proxy outlives the Hermes process that started it, so it inherits only what a
+# Go program needs to run, find its home directory, reach the network and trust
+# certificates. Nothing else from Hermes' environment, and no TINFOIL_* variable:
+# the proxy takes no key, and the plugin's settings are read here, not by the proxy.
+_CHILD_ENV = frozenset({
+    "PATH", "HOME", "USER", "TMPDIR", "TZ",
+    "LANG", "LC_ALL", "LC_CTYPE", "LC_COLLATE", "LC_MESSAGES",
+    "LC_MONETARY", "LC_NUMERIC", "LC_TIME",
+    "SSL_CERT_FILE", "SSL_CERT_DIR",
+    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
+})
+_CHILD_ENV_WINDOWS = frozenset({"SYSTEMROOT", "WINDIR", "USERPROFILE", "TEMP", "TMP"})
 _RETRY_AFTER_FAILURE = 30.0
 
 _lock = threading.Lock()
@@ -114,8 +124,11 @@ def _log_path() -> Path:
 
 
 def _child_env() -> dict[str, str]:
-    return {name: value for name, value in os.environ.items()
-            if not name.upper().endswith(_SECRET_SUFFIXES)}
+    """The detached proxy's environment: an allowlist, never Hermes' environment minus a few names."""
+    if os.name == "nt":  # Windows names are case-insensitive
+        allowed = {name.upper() for name in _CHILD_ENV | _CHILD_ENV_WINDOWS}
+        return {name: value for name, value in os.environ.items() if name.upper() in allowed}
+    return {name: value for name, value in os.environ.items() if name in _CHILD_ENV}
 
 
 def _spawn(binary: str, port: int) -> subprocess.Popen:

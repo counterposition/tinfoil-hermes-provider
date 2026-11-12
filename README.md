@@ -207,9 +207,12 @@ What to expect:
   [The local proxy starts itself](#the-local-proxy-starts-itself), run in its
   own session.
 - **Credentials.** `TINFOIL_API_KEY` comes from Hermes' configuration and is
-  sent to the proxy as the request's bearer token. The proxy starts without
-  any environment variable ending in `_API_KEY`, `_TOKEN`, `_SECRET`,
-  `_PASSWORD` or `_ADMIN_KEY`.
+  sent to the proxy as the request's bearer token. The proxy gets only an
+  allowlist of Hermes' environment: `PATH`, home and temp directories, user,
+  locale and time zone, certificate locations (`SSL_CERT_FILE`,
+  `SSL_CERT_DIR`) and HTTP proxy settings (`HTTP(S)_PROXY`, `NO_PROXY`), plus
+  Windows system directories. Nothing else reaches it, including every
+  `TINFOIL_*` variable.
 
 **`tinfoil-sandbox`**
 
